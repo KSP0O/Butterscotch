@@ -1,4 +1,5 @@
 #include "../../data_win.h"
+#include "../../vm.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -25,6 +26,7 @@ typedef struct {
     const char* screenshotPattern;
     FrameSetEntry* screenshotFrames;
     bool headless;
+    bool printDeclaredFunctions;
 } CommandLineArgs;
 
 static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) {
@@ -34,6 +36,7 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
         {"screenshot",          required_argument, nullptr, 's'},
         {"screenshot-at-frame", required_argument, nullptr, 'f'},
         {"headless",            no_argument,       nullptr, 'h'},
+        {"print-declared-functions", no_argument,       nullptr, 'p'},
         {nullptr,               0,                 nullptr,  0 }
     };
 
@@ -48,7 +51,7 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
             case 'f': {
                 char* endPtr;
                 long frame = strtol(optarg, &endPtr, 10);
-                if (*endPtr != '\0' || frame < 0) {
+                if (*endPtr != '\0' || 0 > frame) {
                     fprintf(stderr, "Error: Invalid frame number '%s'\n", optarg);
                     exit(1);
                 }
@@ -58,6 +61,9 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
             }
             case 'h':
                 args->headless = true;
+                break;
+            case 'p':
+                args->printDeclaredFunctions = true;
                 break;
             default:
                 fprintf(stderr, "Usage: %s [--headless] [--screenshot=PATTERN] [--screenshot-at-frame=N ...] <path to data.win or game.unx>\n", argv[0]);
@@ -121,6 +127,18 @@ int main(int argc, char* argv[]) {
     char windowTitle[256];
     snprintf(windowTitle, sizeof(windowTitle), "Butterscotch - %s", gen8->displayName);
 
+    // Initialize VM
+    VMContext* vm = VM_create(dataWin);
+
+    if (args.printDeclaredFunctions) {
+        repeat(hmlen(vm->funcMap), i) {
+            printf("[%d] %s\n", vm->funcMap[i].value, vm->funcMap[i].key);
+        }
+        VM_free(vm);
+        DataWin_free(dataWin);
+        return 0;
+    }
+
     // Init GLFW
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
@@ -182,6 +200,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    VM_free(vm);
     glfwDestroyWindow(window);
     glfwTerminate();
     DataWin_free(dataWin);
