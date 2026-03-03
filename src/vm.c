@@ -206,6 +206,31 @@ static void arrayMapSet(ArrayMapEntry** map, int32_t varID, int32_t arrayIndex, 
     hmput(*map, k, val);
 }
 
+// ===[ Array Access Helpers ]===
+
+typedef struct {
+    int32_t arrayIndex; // -1 when not an array access
+    bool isArray;
+} ArrayAccess;
+
+// Pops array index (and optional stacktop value) from the stack if the varRef
+// indicates an array or stacktop access. Returns { .arrayIndex = -1, .isArray = false }
+// for plain variable access.
+static ArrayAccess popArrayAccess(VMContext* ctx, uint32_t varRef) {
+    uint8_t varType = (varRef >> 24) & 0xFF;
+    if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
+        RValue indexVal = stackPop(&ctx->stack);
+        int32_t arrayIndex = RValue_toInt32(indexVal);
+        RValue_free(&indexVal);
+        if (varType == VARTYPE_STACKTOP) {
+            RValue stacktop = stackPop(&ctx->stack);
+            RValue_free(&stacktop);
+        }
+        return (ArrayAccess){ .arrayIndex = arrayIndex, .isArray = true };
+    }
+    return (ArrayAccess){ .arrayIndex = -1, .isArray = false };
+}
+
 // ===[ Variable Resolution ]===
 static Variable* resolveVarDef(VMContext* ctx, uint32_t varRef) {
     uint32_t varIndex = varRef & 0x07FFFFFF;
@@ -217,47 +242,26 @@ static Variable* resolveVarDef(VMContext* ctx, uint32_t varRef) {
 static RValue resolveVariableRead(VMContext* ctx, int16_t instanceType, uint32_t varRef) {
     Variable* varDef = resolveVarDef(ctx, varRef);
 
+    ArrayAccess access = popArrayAccess(ctx, varRef);
+
     // Check for built-in variable (varID == -6 sentinel)
     if (varDef->varID == -6) {
-        uint8_t varType2 = (varRef >> 24) & 0xFF;
-        int32_t arrayIndex2 = -1;
-        if (varType2 == VARTYPE_ARRAY || varType2 == VARTYPE_STACKTOP) {
-            RValue indexVal2 = stackPop(&ctx->stack);
-            arrayIndex2 = RValue_toInt32(indexVal2);
-            RValue_free(&indexVal2);
-            if (varType2 == VARTYPE_STACKTOP) {
-                RValue stacktop2 = stackPop(&ctx->stack);
-                RValue_free(&stacktop2);
-            }
-        }
-        return VMBuiltins_getVariable(ctx, varDef->name, arrayIndex2);
+        return VMBuiltins_getVariable(ctx, varDef->name, access.arrayIndex);
     }
 
     // Check for array access
-    uint8_t varType = (varRef >> 24) & 0xFF;
-    if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
-        // Pop array index from stack
-        RValue indexVal = stackPop(&ctx->stack);
-        int32_t arrayIndex = RValue_toInt32(indexVal);
-        RValue_free(&indexVal);
-
-        // If stacktop, pop the instance id too (we ignore it for now)
-        if (varType == VARTYPE_STACKTOP) {
-            RValue stacktop = stackPop(&ctx->stack);
-            RValue_free(&stacktop);
-        }
-
+    if (access.isArray) {
         switch (instanceType) {
             case INSTANCE_LOCAL:
-                return arrayMapGet(ctx->localArrayMap, varDef->varID, arrayIndex);
+                return arrayMapGet(ctx->localArrayMap, varDef->varID, access.arrayIndex);
             case INSTANCE_GLOBAL:
-                return arrayMapGet(ctx->globalArrayMap, varDef->varID, arrayIndex);
+                return arrayMapGet(ctx->globalArrayMap, varDef->varID, access.arrayIndex);
             case INSTANCE_SELF:
             default: {
                 // INSTANCE_SELF or positive instanceType (object index) - both use current instance
                 struct Instance* inst = ctx->currentInstance;
                 if (inst != nullptr) {
-                    return arrayMapGet(inst->selfArrayMap, varDef->varID, arrayIndex);
+                    return arrayMapGet(inst->selfArrayMap, varDef->varID, access.arrayIndex);
                 }
                 fprintf(stderr, "VM: Array read on self var '%s' but no current instance (instanceType=%d)\n", varDef->name, instanceType);
                 return RValue_makeReal(0.0);
@@ -290,50 +294,29 @@ static RValue resolveVariableRead(VMContext* ctx, int16_t instanceType, uint32_t
 static void resolveVariableWrite(VMContext* ctx, int16_t instanceType, uint32_t varRef, RValue val) {
     Variable* varDef = resolveVarDef(ctx, varRef);
 
+    ArrayAccess access = popArrayAccess(ctx, varRef);
+
     // Check for built-in variable (varID == -6 sentinel)
     if (varDef->varID == -6) {
-        uint8_t varType = (varRef >> 24) & 0xFF;
-        int32_t arrayIndex = -1;
-        if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
-            RValue indexVal = stackPop(&ctx->stack);
-            arrayIndex = RValue_toInt32(indexVal);
-            RValue_free(&indexVal);
-            if (varType == VARTYPE_STACKTOP) {
-                RValue stacktop = stackPop(&ctx->stack);
-                RValue_free(&stacktop);
-            }
-        }
-        VMBuiltins_setVariable(ctx, varDef->name, val, arrayIndex);
+        VMBuiltins_setVariable(ctx, varDef->name, val, access.arrayIndex);
         return;
     }
 
     // Check for array access
-    uint8_t varType = (varRef >> 24) & 0xFF;
-    if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
-        // Pop array index from stack
-        RValue indexVal = stackPop(&ctx->stack);
-        int32_t arrayIndex = RValue_toInt32(indexVal);
-        RValue_free(&indexVal);
-
-        // If stacktop, pop the instance id too (we ignore it for now)
-        if (varType == VARTYPE_STACKTOP) {
-            RValue stacktop = stackPop(&ctx->stack);
-            RValue_free(&stacktop);
-        }
-
+    if (access.isArray) {
         switch (instanceType) {
             case INSTANCE_LOCAL:
-                arrayMapSet(&ctx->localArrayMap, varDef->varID, arrayIndex, val);
+                arrayMapSet(&ctx->localArrayMap, varDef->varID, access.arrayIndex, val);
                 return;
             case INSTANCE_GLOBAL:
-                arrayMapSet(&ctx->globalArrayMap, varDef->varID, arrayIndex, val);
+                arrayMapSet(&ctx->globalArrayMap, varDef->varID, access.arrayIndex, val);
                 return;
             case INSTANCE_SELF:
             default: {
                 // INSTANCE_SELF or positive instanceType (object index)
                 struct Instance* inst = ctx->currentInstance;
                 if (inst != nullptr) {
-                    arrayMapSet(&inst->selfArrayMap, varDef->varID, arrayIndex, val);
+                    arrayMapSet(&inst->selfArrayMap, varDef->varID, access.arrayIndex, val);
                     return;
                 }
                 fprintf(stderr, "VM: Array write on self var '%s' but no current instance (instanceType=%d)\n", varDef->name, instanceType);
@@ -481,23 +464,16 @@ static void handlePushScoped(VMContext* ctx, uint32_t instr, const uint8_t* extr
     uint32_t varRef = resolveVarOperand(ctx, extraData);
     Variable* varDef = resolveVarDef(ctx, varRef);
 
-    uint8_t varType = (varRef >> 24) & 0xFF;
-    if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
-        RValue indexVal = stackPop(&ctx->stack);
-        int32_t arrayIndex = RValue_toInt32(indexVal);
-        RValue_free(&indexVal);
-        if (varType == VARTYPE_STACKTOP) {
-            RValue stacktop = stackPop(&ctx->stack);
-            RValue_free(&stacktop);
-        }
-        stackPush(&ctx->stack, arrayMapGet(variableMap, varDef->varID, arrayIndex));
+    ArrayAccess access = popArrayAccess(ctx, varRef);
+    if (access.isArray) {
+        stackPush(&ctx->stack, arrayMapGet(variableMap, varDef->varID, access.arrayIndex));
         return;
     }
 
     require(count > (uint32_t) varDef->varID);
-    RValue glbVal = variables[varDef->varID];
-    glbVal.ownsString = false; // Non-owning copy
-    stackPush(&ctx->stack, glbVal);
+    RValue val = variables[varDef->varID];
+    val.ownsString = false; // Non-owning copy
+    stackPush(&ctx->stack, val);
 }
 
 static void handlePushLoc(VMContext* ctx, uint32_t instr, const uint8_t* extraData) {
@@ -513,20 +489,9 @@ static void handlePushBltn(VMContext* ctx, uint32_t instr, const uint8_t* extraD
     uint32_t varRef = resolveVarOperand(ctx, extraData);
     Variable* varDef = resolveVarDef(ctx, varRef);
 
-    // Check for array access (e.g. alarm[0])
-    uint8_t varType = (varRef >> 24) & 0xFF;
-    int32_t arrayIndex = -1;
-    if (varType == VARTYPE_ARRAY || varType == VARTYPE_STACKTOP) {
-        RValue indexVal = stackPop(&ctx->stack);
-        arrayIndex = RValue_toInt32(indexVal);
-        RValue_free(&indexVal);
-        if (varType == VARTYPE_STACKTOP) {
-            RValue stacktop = stackPop(&ctx->stack);
-            RValue_free(&stacktop);
-        }
-    }
+    ArrayAccess access = popArrayAccess(ctx, varRef);
 
-    RValue val = VMBuiltins_getVariable(ctx, varDef->name, arrayIndex);
+    RValue val = VMBuiltins_getVariable(ctx, varDef->name, access.arrayIndex);
     stackPush(&ctx->stack, val);
 }
 
