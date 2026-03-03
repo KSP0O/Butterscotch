@@ -1,7 +1,7 @@
 #include "runner.h"
 
 Runner* Runner_create(DataWin* dataWin, VMContext* vm) {
-    Runner* runner = (Runner*)malloc(sizeof(Runner));
+    Runner* runner = malloc(sizeof(Runner));
     runner->dataWin = dataWin;
     runner->vmContext = vm;
     // GameMaker always starts the game in the first room
