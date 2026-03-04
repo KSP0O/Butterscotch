@@ -1347,11 +1347,58 @@ static RValue builtin_drawSetAlpha(VMContext* ctx, RValue* args, [[maybe_unused]
     return RValue_makeUndefined();
 }
 
-STUB_RETURN_UNDEFINED(draw_set_font)
-STUB_RETURN_UNDEFINED(draw_set_halign)
-STUB_RETURN_UNDEFINED(draw_set_valign)
-STUB_RETURN_UNDEFINED(draw_text)
-STUB_RETURN_UNDEFINED(draw_text_transformed)
+static RValue builtin_drawSetFont(VMContext* ctx, RValue* args, [[maybe_unused]] int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    if (runner->renderer != nullptr) {
+        runner->renderer->drawFont = RValue_toInt32(args[0]);
+    }
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_drawSetHalign(VMContext* ctx, RValue* args, [[maybe_unused]] int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    if (runner->renderer != nullptr) {
+        runner->renderer->drawHalign = RValue_toInt32(args[0]);
+    }
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_drawSetValign(VMContext* ctx, RValue* args, [[maybe_unused]] int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    if (runner->renderer != nullptr) {
+        runner->renderer->drawValign = RValue_toInt32(args[0]);
+    }
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_drawText(VMContext* ctx, RValue* args, [[maybe_unused]] int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    if (runner->renderer == nullptr) return RValue_makeUndefined();
+
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    char* str = RValue_toString(args[2]);
+
+    runner->renderer->vtable->drawText(runner->renderer, str, x, y, 1.0f, 1.0f, 0.0f);
+    free(str);
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_drawTextTransformed(VMContext* ctx, RValue* args, [[maybe_unused]] int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    if (runner->renderer == nullptr) return RValue_makeUndefined();
+
+    float x = (float) RValue_toReal(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+    char* str = RValue_toString(args[2]);
+    float xscale = (float) RValue_toReal(args[3]);
+    float yscale = (float) RValue_toReal(args[4]);
+    float angle = (float) RValue_toReal(args[5]);
+
+    runner->renderer->vtable->drawText(runner->renderer, str, x, y, xscale, yscale, angle);
+    free(str);
+    return RValue_makeUndefined();
+}
 STUB_RETURN_UNDEFINED(draw_text_ext)
 STUB_RETURN_UNDEFINED(draw_text_ext_transformed)
 STUB_RETURN_UNDEFINED(draw_surface)
@@ -1687,11 +1734,11 @@ void VMBuiltins_registerAll(void) {
     registerBuiltin("draw_rectangle", builtin_drawRectangle);
     registerBuiltin("draw_set_color", builtin_drawSetColor);
     registerBuiltin("draw_set_alpha", builtin_drawSetAlpha);
-    registerBuiltin("draw_set_font", builtin_draw_set_font);
-    registerBuiltin("draw_set_halign", builtin_draw_set_halign);
-    registerBuiltin("draw_set_valign", builtin_draw_set_valign);
-    registerBuiltin("draw_text", builtin_draw_text);
-    registerBuiltin("draw_text_transformed", builtin_draw_text_transformed);
+    registerBuiltin("draw_set_font", builtin_drawSetFont);
+    registerBuiltin("draw_set_halign", builtin_drawSetHalign);
+    registerBuiltin("draw_set_valign", builtin_drawSetValign);
+    registerBuiltin("draw_text", builtin_drawText);
+    registerBuiltin("draw_text_transformed", builtin_drawTextTransformed);
     registerBuiltin("draw_text_ext", builtin_draw_text_ext);
     registerBuiltin("draw_text_ext_transformed", builtin_draw_text_ext_transformed);
     registerBuiltin("draw_surface", builtin_draw_surface);

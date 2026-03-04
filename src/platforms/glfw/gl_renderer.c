@@ -483,6 +483,174 @@ static void glDrawRectangle(Renderer* renderer, float x1, float y1, float x2, fl
     }
 }
 
+// ===[ Text Drawing ]===
+
+static FontGlyph* findGlyph(Font* font, uint16_t ch) {
+    repeat(font->glyphCount, i) {
+        if (font->glyphs[i].character == ch) return &font->glyphs[i];
+    }
+    return nullptr;
+}
+
+static float measureLineWidth(Font* font, const char* line, int32_t len) {
+    float width = 0;
+    repeat(len, i) {
+        uint16_t ch = (uint8_t) line[i];
+        FontGlyph* glyph = findGlyph(font, ch);
+        if (glyph == nullptr) continue;
+
+        width += glyph->shift;
+
+        // Add kerning if next character has a kerning pair
+        if (len > i + 1) {
+            uint16_t nextCh = (uint8_t) line[i + 1];
+            repeat(glyph->kerningCount, k) {
+                if (glyph->kerning[k].character == (int16_t) nextCh) {
+                    width += glyph->kerning[k].shiftModifier;
+                    break;
+                }
+            }
+        }
+    }
+    return width;
+}
+
+static void glDrawText(Renderer* renderer, const char* text, float x, float y, float xscale, float yscale, float angleDeg) {
+    GLRenderer* gl = (GLRenderer*) renderer;
+    DataWin* dw = renderer->dataWin;
+
+    int32_t fontIndex = renderer->drawFont;
+    if (0 > fontIndex || dw->font.count <= (uint32_t) fontIndex) return;
+
+    Font* font = &dw->font.fonts[fontIndex];
+
+    // Resolve font texture page
+    int32_t fontTpagIndex = DataWin_resolveTPAG(dw, font->textureOffset);
+    if (0 > fontTpagIndex) return;
+
+    TexturePageItem* fontTpag = &dw->tpag.items[fontTpagIndex];
+    int16_t pageId = fontTpag->texturePageId;
+    if (0 > pageId || gl->textureCount <= (uint32_t) pageId) return;
+
+    GLuint texId = gl->glTextures[pageId];
+    int32_t texW = gl->textureWidths[pageId];
+    int32_t texH = gl->textureHeights[pageId];
+    if (texW == 0 || texH == 0) return;
+
+    uint32_t color = renderer->drawColor;
+    float alpha = renderer->drawAlpha;
+    float r = (float) BGR_R(color) / 255.0f;
+    float g = (float) BGR_G(color) / 255.0f;
+    float b = (float) BGR_B(color) / 255.0f;
+
+    // Split text into lines on \n, \r, and # (GML newline in draw_text)
+    // Count lines and record their start/length
+    int32_t lineCount = 1;
+    int32_t textLen = (int32_t) strlen(text);
+    repeat(textLen, i) {
+        if (text[i] == '\n' || text[i] == '\r' || text[i] == '#') lineCount++;
+    }
+
+    // Vertical alignment offset
+    float totalHeight = (float) lineCount * (float) font->emSize;
+    float valignOffset = 0;
+    if (renderer->drawValign == 1) valignOffset = -totalHeight / 2.0f;
+    else if (renderer->drawValign == 2) valignOffset = -totalHeight;
+
+    // Build transform matrix
+    float angleRad = -angleDeg * ((float) M_PI / 180.0f);
+    Matrix4f transform;
+    Matrix4f_setTransform2D(&transform, x, y, xscale * font->scaleX, yscale * font->scaleY, angleRad);
+
+    // Iterate through lines
+    float cursorY = valignOffset;
+    int32_t lineStart = 0;
+
+    repeat(lineCount, lineIdx) {
+        // Find end of current line
+        int32_t lineEnd = lineStart;
+        while (textLen > lineEnd && text[lineEnd] != '\n' && text[lineEnd] != '\r' && text[lineEnd] != '#') {
+            lineEnd++;
+        }
+        int32_t lineLen = lineEnd - lineStart;
+
+        // Horizontal alignment offset for this line
+        float lineWidth = measureLineWidth(font, text + lineStart, lineLen);
+        float halignOffset = 0;
+        if (renderer->drawHalign == 1) halignOffset = -lineWidth / 2.0f;
+        else if (renderer->drawHalign == 2) halignOffset = -lineWidth;
+
+        float cursorX = halignOffset;
+
+        // Render each glyph in the line
+        repeat(lineLen, i) {
+            uint16_t ch = (uint8_t) text[lineStart + i];
+            FontGlyph* glyph = findGlyph(font, ch);
+            if (glyph == nullptr) continue;
+            if (glyph->sourceWidth == 0 || glyph->sourceHeight == 0) {
+                cursorX += glyph->shift;
+                continue;
+            }
+
+            // Flush if texture changed or batch full
+            if (gl->quadCount > 0 && gl->currentTextureId != texId) flushBatch(gl);
+            if (gl->quadCount >= MAX_QUADS) flushBatch(gl);
+            gl->currentTextureId = texId;
+
+            // Compute UVs from glyph position in the font's atlas
+            float u0 = (float) (fontTpag->sourceX + glyph->sourceX) / (float) texW;
+            float v0 = (float) (fontTpag->sourceY + glyph->sourceY) / (float) texH;
+            float u1 = (float) (fontTpag->sourceX + glyph->sourceX + glyph->sourceWidth) / (float) texW;
+            float v1 = (float) (fontTpag->sourceY + glyph->sourceY + glyph->sourceHeight) / (float) texH;
+
+            // Local quad position (before transform)
+            float localX0 = cursorX + glyph->offset;
+            float localY0 = cursorY;
+            float localX1 = localX0 + (float) glyph->sourceWidth;
+            float localY1 = localY0 + (float) glyph->sourceHeight;
+
+            // Transform corners
+            float px0, py0, px1, py1, px2, py2, px3, py3;
+            Matrix4f_transformPoint(&transform, localX0, localY0, &px0, &py0);
+            Matrix4f_transformPoint(&transform, localX1, localY0, &px1, &py1);
+            Matrix4f_transformPoint(&transform, localX1, localY1, &px2, &py2);
+            Matrix4f_transformPoint(&transform, localX0, localY1, &px3, &py3);
+
+            // Write 4 vertices
+            float* verts = gl->vertexData + gl->quadCount * VERTICES_PER_QUAD * FLOATS_PER_VERTEX;
+
+            verts[0] = px0; verts[1] = py0; verts[2] = u0; verts[3] = v0;
+            verts[4] = r;   verts[5] = g;   verts[6] = b;  verts[7] = alpha;
+
+            verts[8]  = px1; verts[9]  = py1; verts[10] = u1; verts[11] = v0;
+            verts[12] = r;   verts[13] = g;   verts[14] = b;  verts[15] = alpha;
+
+            verts[16] = px2; verts[17] = py2; verts[18] = u1; verts[19] = v1;
+            verts[20] = r;   verts[21] = g;   verts[22] = b;  verts[23] = alpha;
+
+            verts[24] = px3; verts[25] = py3; verts[26] = u0; verts[27] = v1;
+            verts[28] = r;   verts[29] = g;   verts[30] = b;  verts[31] = alpha;
+
+            gl->quadCount++;
+
+            // Advance cursor by glyph shift + kerning
+            cursorX += glyph->shift;
+            if (lineLen > i + 1) {
+                uint16_t nextCh = (uint8_t) text[lineStart + i + 1];
+                repeat(glyph->kerningCount, k) {
+                    if (glyph->kerning[k].character == (int16_t) nextCh) {
+                        cursorX += glyph->kerning[k].shiftModifier;
+                        break;
+                    }
+                }
+            }
+        }
+
+        cursorY += (float) font->emSize;
+        lineStart = lineEnd + 1; // skip the newline character
+    }
+}
+
 // ===[ Vtable ]===
 
 static RendererVtable glVtable = {
@@ -493,6 +661,7 @@ static RendererVtable glVtable = {
     .drawSprite = glDrawSprite,
     .drawSpritePart = glDrawSpritePart,
     .drawRectangle = glDrawRectangle,
+    .drawText = glDrawText,
     .flush = glRendererFlush,
 };
 
