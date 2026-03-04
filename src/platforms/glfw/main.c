@@ -26,8 +26,10 @@ typedef struct {
     const char* dataWinPath;
     const char* screenshotPattern;
     FrameSetEntry* screenshotFrames;
-    StringBooleanEntry* globalVarsToBeTraced;
-    StringBooleanEntry* instanceVarsToBeTraced;
+    StringBooleanEntry* globalVarReadsToBeTraced;
+    StringBooleanEntry* globalVarWritesToBeTraced;
+    StringBooleanEntry* instanceVarReadsToBeTraced;
+    StringBooleanEntry* instanceVarWritesToBeTraced;
     StringBooleanEntry* functionCallsToBeTraced;
     StringBooleanEntry* alarmsToBeTraced;
     StringBooleanEntry* instanceLifecyclesToBeTraced;
@@ -47,8 +49,10 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
         {"headless",            no_argument,       nullptr, 'h'},
         {"print-rooms", no_argument,               nullptr, 'r'},
         {"print-declared-functions", no_argument,  nullptr, 'p'},
-        {"trace-global-vars", required_argument,         nullptr, 't'},
-        {"trace-instance-vars", required_argument,         nullptr, 'i'},
+        {"trace-global-variable-reads", required_argument,  nullptr, 'T'},
+        {"trace-global-variable-writes", required_argument, nullptr, 't'},
+        {"trace-instance-variable-reads", required_argument, nullptr, 'I'},
+        {"trace-instance-variable-writes", required_argument, nullptr, 'i'},
         {"trace-function-calls", required_argument,         nullptr, 'c'},
         {"trace-alarms", required_argument,         nullptr, 'a'},
         {"trace-instance-lifecycles", required_argument,         nullptr, 'l'},
@@ -85,11 +89,17 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
             case 'p':
                 args->printDeclaredFunctions = true;
                 break;
+            case 'T':
+                shput(args->globalVarReadsToBeTraced, optarg, true);
+                break;
             case 't':
-                shput(args->globalVarsToBeTraced, optarg, true);
+                shput(args->globalVarWritesToBeTraced, optarg, true);
+                break;
+            case 'I':
+                shput(args->instanceVarReadsToBeTraced, optarg, true);
                 break;
             case 'i':
-                shput(args->instanceVarsToBeTraced, optarg, true);
+                shput(args->instanceVarWritesToBeTraced, optarg, true);
                 break;
             case 'c':
                 shput(args->functionCallsToBeTraced, optarg, true);
@@ -127,8 +137,10 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
 
 static void freeCommandLineArgs(CommandLineArgs* args) {
     hmfree(args->screenshotFrames);
-    shfree(args->globalVarsToBeTraced);
-    shfree(args->instanceVarsToBeTraced);
+    shfree(args->globalVarReadsToBeTraced);
+    shfree(args->globalVarWritesToBeTraced);
+    shfree(args->instanceVarReadsToBeTraced);
+    shfree(args->instanceVarWritesToBeTraced);
     shfree(args->functionCallsToBeTraced);
     shfree(args->alarmsToBeTraced);
     shfree(args->instanceLifecyclesToBeTraced);
@@ -213,8 +225,10 @@ int main(int argc, char* argv[]) {
 
     // Initialize the runner
     Runner* runner = Runner_create(dataWin, vm);
-    shcopyFromTo(args.globalVarsToBeTraced, runner->vmContext->globalVarsToBeTraced);
-    shcopyFromTo(args.instanceVarsToBeTraced, runner->vmContext->instanceVarsToBeTraced);
+    shcopyFromTo(args.globalVarReadsToBeTraced, runner->vmContext->globalVarReadsToBeTraced);
+    shcopyFromTo(args.globalVarWritesToBeTraced, runner->vmContext->globalVarWritesToBeTraced);
+    shcopyFromTo(args.instanceVarReadsToBeTraced, runner->vmContext->instanceVarReadsToBeTraced);
+    shcopyFromTo(args.instanceVarWritesToBeTraced, runner->vmContext->instanceVarWritesToBeTraced);
     shcopyFromTo(args.functionCallsToBeTraced, runner->vmContext->functionCallsToBeTraced);
     shcopyFromTo(args.alarmsToBeTraced, runner->vmContext->alarmsToBeTraced);
     shcopyFromTo(args.instanceLifecyclesToBeTraced, runner->vmContext->instanceLifecyclesToBeTraced);

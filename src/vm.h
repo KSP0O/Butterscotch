@@ -131,8 +131,10 @@ typedef struct VMContext {
     StringBooleanEntry* loggedUnknownFuncs;
     // "codeName\tfuncName" -> true, for deduplicating stubbed function warnings
     StringBooleanEntry* loggedStubbedFuncs;
-    StringBooleanEntry* globalVarsToBeTraced;
-    StringBooleanEntry* instanceVarsToBeTraced;
+    StringBooleanEntry* globalVarReadsToBeTraced;
+    StringBooleanEntry* globalVarWritesToBeTraced;
+    StringBooleanEntry* instanceVarReadsToBeTraced;
+    StringBooleanEntry* instanceVarWritesToBeTraced;
     StringBooleanEntry* functionCallsToBeTraced;
     StringBooleanEntry* alarmsToBeTraced;
     StringBooleanEntry* instanceLifecyclesToBeTraced;
