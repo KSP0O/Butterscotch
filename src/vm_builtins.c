@@ -143,6 +143,24 @@ RValue VMBuiltins_getVariable(VMContext* ctx, const char* name, int32_t arrayInd
             }
             return RValue_makeReal(0.0);
         }
+        if (strcmp(name, "view_yview") == 0) {
+            if (arrayIndex >= 0 && 8 > arrayIndex) {
+                return RValue_makeReal((double) runner->currentRoom->views[arrayIndex].viewY);
+            }
+            return RValue_makeReal(0.0);
+        }
+        if (strcmp(name, "view_wview") == 0) {
+            if (arrayIndex >= 0 && 8 > arrayIndex) {
+                return RValue_makeReal((double) runner->currentRoom->views[arrayIndex].viewWidth);
+            }
+            return RValue_makeReal(0.0);
+        }
+        if (strcmp(name, "view_hview") == 0) {
+            if (arrayIndex >= 0 && 8 > arrayIndex) {
+                return RValue_makeReal((double) runner->currentRoom->views[arrayIndex].viewHeight);
+            }
+            return RValue_makeReal(0.0);
+        }
     }
 
     // Timing

@@ -258,7 +258,9 @@ static bool shouldTraceVariable(StringBooleanEntry* traceMap, const char* scopeN
 
 typedef struct {
     int32_t arrayIndex; // -1 when not an array access
+    int16_t instanceType; // Instance type from stack (for VARTYPE_ARRAY)
     bool isArray;
+    bool hasInstanceType; // true when instanceType was popped from stack
 } ArrayAccess;
 
 // Pops array index (and optional stacktop value) from the stack if the varRef
@@ -273,16 +275,17 @@ static ArrayAccess popArrayAccess(VMContext* ctx, uint32_t varRef) {
         RValue_free(&indexVal);
 
         RValue instTypeVal = stackPop(ctx);
+        int16_t instanceType = (int16_t) RValue_toInt32(instTypeVal);
         RValue_free(&instTypeVal);
 
-        return (ArrayAccess){ .arrayIndex = arrayIndex, .isArray = true };
+        return (ArrayAccess){ .arrayIndex = arrayIndex, .instanceType = instanceType, .isArray = true, .hasInstanceType = true };
     }
     if (varType == VARTYPE_STACKTOP) {
         RValue stacktop = stackPop(ctx);
         RValue_free(&stacktop);
-        return (ArrayAccess){ .arrayIndex = -1, .isArray = true };
+        return (ArrayAccess){ .arrayIndex = -1, .isArray = true, .hasInstanceType = false };
     }
-    return (ArrayAccess){ .arrayIndex = -1, .isArray = false };
+    return (ArrayAccess){ .arrayIndex = -1, .isArray = false, .hasInstanceType = false };
 }
 
 // ===[ Variable Resolution ]===
@@ -297,6 +300,11 @@ static RValue resolveVariableRead(VMContext* ctx, int16_t instanceType, uint32_t
     Variable* varDef = resolveVarDef(ctx, varRef);
 
     ArrayAccess access = popArrayAccess(ctx, varRef);
+
+    // Use instance type from stack when available (VARTYPE_ARRAY pushes it)
+    if (access.hasInstanceType) {
+        instanceType = access.instanceType;
+    }
 
     // Check for built-in variable (varID == -6 sentinel)
     if (varDef->varID == -6) {
@@ -378,6 +386,11 @@ static void resolveVariableWrite(VMContext* ctx, int16_t instanceType, uint32_t 
     Variable* varDef = resolveVarDef(ctx, varRef);
 
     ArrayAccess access = popArrayAccess(ctx, varRef);
+
+    // Use instance type from stack when available (VARTYPE_ARRAY pushes it)
+    if (access.hasInstanceType) {
+        instanceType = access.instanceType;
+    }
 
     // Check for built-in variable (varID == -6 sentinel)
     if (varDef->varID == -6) {
