@@ -1094,6 +1094,44 @@ static void handleCall(VMContext* ctx, uint32_t instr, const uint8_t* extraData)
 
 // ===[ Execution Loop ]===
 
+static const char* opcodeName(uint8_t opcode) {
+    switch (opcode) {
+        case OP_CONV:    return "Conv";
+        case OP_MUL:     return "Mul";
+        case OP_DIV:     return "Div";
+        case OP_REM:     return "Rem";
+        case OP_MOD:     return "Mod";
+        case OP_ADD:     return "Add";
+        case OP_SUB:     return "Sub";
+        case OP_AND:     return "And";
+        case OP_OR:      return "Or";
+        case OP_XOR:     return "Xor";
+        case OP_NEG:     return "Neg";
+        case OP_NOT:     return "Not";
+        case OP_SHL:     return "Shl";
+        case OP_SHR:     return "Shr";
+        case OP_CMP:     return "Cmp";
+        case OP_POP:     return "Pop";
+        case OP_PUSHI:   return "PushI";
+        case OP_DUP:     return "Dup";
+        case OP_RET:     return "Ret";
+        case OP_EXIT:    return "Exit";
+        case OP_POPZ:    return "Popz";
+        case OP_B:       return "B";
+        case OP_BT:      return "BT";
+        case OP_BF:      return "BF";
+        case OP_PUSHENV: return "PushEnv";
+        case OP_POPENV:  return "PopEnv";
+        case OP_PUSH:    return "Push";
+        case OP_PUSHLOC: return "PushLoc";
+        case OP_PUSHGLB: return "PushGlb";
+        case OP_PUSHBLTN:return "PushBltn";
+        case OP_CALL:    return "Call";
+        case OP_BREAK:   return "Break";
+        default:         return "???";
+    }
+}
+
 static RValue executeLoop(VMContext* ctx) {
     while (ctx->codeEnd > ctx->ip) {
         uint32_t instrAddr = ctx->ip;
@@ -1109,6 +1147,12 @@ static RValue executeLoop(VMContext* ctx) {
         }
 
         uint8_t opcode = instrOpcode(instr);
+
+        if (shlen(ctx->opcodesToBeTraced) > 0) {
+            if (shgeti(ctx->opcodesToBeTraced, "*") != -1 || shgeti(ctx->opcodesToBeTraced, ctx->currentCodeName) != -1) {
+                printf("VM: [%s] @%u %s (0x%08X) [stack=%d]\n", ctx->currentCodeName, instrAddr, opcodeName(opcode), instr, ctx->stack.top);
+            }
+        }
 
         switch (opcode) {
             // Push instructions
@@ -1487,6 +1531,7 @@ void VM_free(VMContext* ctx) {
     shfree(ctx->alarmsToBeTraced);
     shfree(ctx->instanceLifecyclesToBeTraced);
     shfree(ctx->eventsToBeTraced);
+    shfree(ctx->opcodesToBeTraced);
     hmfree(ctx->varRefMap);
     hmfree(ctx->funcRefMap);
 

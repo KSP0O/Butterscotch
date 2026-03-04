@@ -34,6 +34,7 @@ typedef struct {
     StringBooleanEntry* alarmsToBeTraced;
     StringBooleanEntry* instanceLifecyclesToBeTraced;
     StringBooleanEntry* eventsToBeTraced;
+    StringBooleanEntry* opcodesToBeTraced;
     bool headless;
     bool traceFrames;
     bool printRooms;
@@ -57,6 +58,7 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
         {"trace-alarms", required_argument,         nullptr, 'a'},
         {"trace-instance-lifecycles", required_argument,         nullptr, 'l'},
         {"trace-events", required_argument,         nullptr, 'e'},
+        {"trace-opcodes", required_argument,       nullptr, 'o'},
         {"trace-frames", no_argument, nullptr, 'k'},
         {nullptr,               0,                 nullptr,  0 }
     };
@@ -113,6 +115,9 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
             case 'e':
                 shput(args->eventsToBeTraced, optarg, true);
                 break;
+            case 'o':
+                shput(args->opcodesToBeTraced, optarg, true);
+                break;
             case 'k':
                 args->traceFrames = true;
                 break;
@@ -145,6 +150,7 @@ static void freeCommandLineArgs(CommandLineArgs* args) {
     shfree(args->alarmsToBeTraced);
     shfree(args->instanceLifecyclesToBeTraced);
     shfree(args->eventsToBeTraced);
+    shfree(args->opcodesToBeTraced);
 }
 
 // ===[ SCREENSHOT ]===
@@ -233,6 +239,7 @@ int main(int argc, char* argv[]) {
     shcopyFromTo(args.alarmsToBeTraced, runner->vmContext->alarmsToBeTraced);
     shcopyFromTo(args.instanceLifecyclesToBeTraced, runner->vmContext->instanceLifecyclesToBeTraced);
     shcopyFromTo(args.eventsToBeTraced, runner->vmContext->eventsToBeTraced);
+    shcopyFromTo(args.opcodesToBeTraced, runner->vmContext->opcodesToBeTraced);
 
     // Init GLFW
     if (!glfwInit()) {
