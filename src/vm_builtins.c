@@ -1426,10 +1426,10 @@ static RValue builtinInstanceExists(VMContext* ctx, RValue* args, int32_t argCou
     bool found = false;
     int32_t instanceCount = (int32_t) arrlen(runner->instances);
     if (id >= 0 && runner->dataWin->objt.count > (uint32_t) id) {
-        // Object type index: search for any active instance with that objectIndex
+        // Object type index: search for any active instance of this object (or descendants)
         repeat(instanceCount, i) {
             Instance* inst = runner->instances[i];
-            if (inst->active && inst->objectIndex == id) {
+            if (inst->active && VM_isObjectOrDescendant(ctx->dataWin, inst->objectIndex, id)) {
                 found = true;
                 break;
             }
@@ -1460,10 +1460,10 @@ static RValue builtinInstanceDestroy(VMContext* ctx, RValue* args, int32_t argCo
     int32_t id = RValue_toInt32(args[0]);
     int32_t instanceCount = (int32_t) arrlen(runner->instances);
     if (id >= 0 && runner->dataWin->objt.count > (uint32_t) id) {
-        // Object type index: destroy all active instances with that objectIndex
+        // Object type index: destroy all active instances of this object (or descendants)
         repeat(instanceCount, i) {
             Instance* inst = runner->instances[i];
-            if (inst->active && inst->objectIndex == id) {
+            if (inst->active && VM_isObjectOrDescendant(ctx->dataWin, inst->objectIndex, id)) {
                 Runner_destroyInstance(runner, inst);
             }
         }
