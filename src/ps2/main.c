@@ -476,7 +476,7 @@ int main(int argc, char* argv[]) {
 
     // ===[ Initialize Audio System ]===
     drawStatusScreen(gsGlobal, gsFontM, dataWin->gen8.displayName, "Initializing audio...", &loadingState);
-    NoopAudioSystem* ps2Audio = NoopAudioSystem_create();
+    Ps2AudioSystem* ps2Audio = Ps2AudioSystem_create();
     AudioSystem* audioSystem = (AudioSystem*) ps2Audio;
     audioSystem->vtable->init(audioSystem, dataWin, fileSystem);
     runner->audioSystem = audioSystem;
