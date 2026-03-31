@@ -129,6 +129,14 @@ static void loadAtlas(GsRenderer* gs) {
 
     fclose(f);
 
+    // Build tile entry hashmap for O(1) lookup
+    gs->tileEntryMap = nullptr;
+    repeat(gs->atlasTileCount, i) {
+        AtlasTileEntry* entry = &gs->atlasTileEntries[i];
+        TileLookupKey key = { .bgDef = entry->bgDef, .srcX = entry->srcX, .srcY = entry->srcY, .srcW = entry->srcW, .srcH = entry->srcH };
+        hmput(gs->tileEntryMap, key, entry);
+    }
+
     gs->atlasBpp = safeCalloc(gs->atlasCount, sizeof(uint8_t));
     gs->atlasToChunk = safeMalloc(gs->atlasCount * sizeof(int16_t));
     repeat(gs->atlasCount, i) {
@@ -776,12 +784,10 @@ static bool setupTextureForTPAG(GsRenderer* gs, GSTEXTURE* tex, int32_t tpagInde
 
 // Finds a tile entry by (bgDef, srcX, srcY, srcW, srcH). Returns nullptr if not found.
 static AtlasTileEntry* findTileEntry(GsRenderer* gs, int16_t bgDef, uint16_t srcX, uint16_t srcY, uint16_t srcW, uint16_t srcH) {
-    forEach(AtlasTileEntry, entry, gs->atlasTileEntries, gs->atlasTileCount) {
-        if (entry->bgDef == bgDef && entry->srcX == srcX && entry->srcY == srcY && entry->srcW == srcW && entry->srcH == srcH) {
-            return entry;
-        }
-    }
-    return nullptr;
+    TileLookupKey key = { .bgDef = bgDef, .srcX = srcX, .srcY = srcY, .srcW = srcW, .srcH = srcH };
+    ptrdiff_t idx = hmgeti(gs->tileEntryMap, key);
+    if (idx == -1) return nullptr;
+    return gs->tileEntryMap[idx].value;
 }
 
 // Configures a GSTEXTURE for rendering a tile entry. Same logic as setupTextureForTPAG but for AtlasTileEntry.
@@ -879,6 +885,7 @@ static void gsDestroy(Renderer* renderer) {
     free(gs->atlasOffsets);
     free(gs->atlasTPAGEntries);
     free(gs->atlasTileEntries);
+    hmfree(gs->tileEntryMap);
     free(gs->chunks);
     free(gs->atlasToChunk);
     free(gs->atlasBpp);
