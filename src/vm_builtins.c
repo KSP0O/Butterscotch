@@ -4417,6 +4417,33 @@ static RValue builtinTileLayerShift(MAYBE_UNUSED VMContext* ctx, RValue* args, M
     return RValue_makeUndefined();
 }
 
+// ===[ Layer Functions ]===
+
+static RValue builtinLayerForceDrawDepth(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    runner->forceDrawDepth = RValue_toBool(args[0]);
+    runner->forcedDepth = RValue_toInt32(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerIsDrawDepthForced(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    return RValue_makeBool(runner->forceDrawDepth);
+}
+
+static RValue builtinLayerGetForcedDepth(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    return RValue_makeReal((GMLReal) runner->forcedDepth);
+}
+
+// ===[ Array Functions ]===
+
+// @@NewGMLArray@@ - GMS2 internal function to create a new empty array.
+// In our VM, arrays are created implicitly on first write, so this is a no-op.
+static RValue builtinNewGMLArray(MAYBE_UNUSED VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    return RValue_makeUndefined();
+}
+
 // ===[ PATH FUNCTIONS ]===
 
 // path_start(path, speed, endaction, absolute) - HTML5: Assign_Path (yyInstance.js:2695-2743)
@@ -5079,6 +5106,14 @@ void VMBuiltins_registerAll(bool isGMS2) {
     registerBuiltin("tile_layer_hide", builtinTileLayerHide);
     registerBuiltin("tile_layer_show", builtinTileLayerShow);
     registerBuiltin("tile_layer_shift", builtinTileLayerShift);
+
+    // Layer
+    registerBuiltin("layer_force_draw_depth", builtinLayerForceDrawDepth);
+    registerBuiltin("layer_is_draw_depth_forced", builtinLayerIsDrawDepthForced);
+    registerBuiltin("layer_get_forced_depth", builtinLayerGetForcedDepth);
+
+    // GMS2 internal
+    registerBuiltin("@@NewGMLArray@@", builtinNewGMLArray);
 
     // Path
     registerBuiltin("path_start", builtinPathStart);
