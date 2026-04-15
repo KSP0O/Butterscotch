@@ -1135,6 +1135,7 @@ static int32_t glCreateSpriteFromSurface(Renderer* renderer, int32_t x, int32_t 
     gl->glTextures[pageId] = newTexId;
     gl->textureWidths[pageId] = w;
     gl->textureHeights[pageId] = h;
+    gl->textureLoaded[pageId] = true;
 
     uint32_t tpagIndex = findOrAllocTpagSlot(dw, gl->originalTpagCount);
     TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
