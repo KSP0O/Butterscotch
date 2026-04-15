@@ -153,40 +153,19 @@ static void glInit(Renderer* renderer, DataWin* dataWin) {
     // Allocate CPU-side vertex buffer
     gl->vertexData = safeMalloc(MAX_QUADS * VERTICES_PER_QUAD * FLOATS_PER_VERTEX * sizeof(float));
 
-    // Load textures from TXTR pages
+    // Prepare texture slots for lazy loading (PNG decode deferred to first use)
     gl->textureCount = dataWin->txtr.count;
     gl->glTextures = safeMalloc(gl->textureCount * sizeof(GLuint));
     gl->textureWidths = safeMalloc(gl->textureCount * sizeof(int32_t));
     gl->textureHeights = safeMalloc(gl->textureCount * sizeof(int32_t));
+    gl->textureLoaded = safeMalloc(gl->textureCount * sizeof(bool));
 
     glGenTextures((GLsizei) gl->textureCount, gl->glTextures);
 
     for (uint32_t i = 0; gl->textureCount > i; i++) {
-        Texture* txtr = &dataWin->txtr.textures[i];
-        uint8_t* pngData = txtr->blobData;
-        uint32_t pngSize = txtr->blobSize;
-
-        int w, h, channels;
-        uint8_t* pixels = stbi_load_from_memory(pngData, (int) pngSize, &w, &h, &channels, 4);
-        if (pixels == nullptr) {
-            fprintf(stderr, "GL: Failed to decode TXTR page %u\n", i);
-            gl->textureWidths[i] = 0;
-            gl->textureHeights[i] = 0;
-            continue;
-        }
-
-        gl->textureWidths[i] = w;
-        gl->textureHeights[i] = h;
-
-        glBindTexture(GL_TEXTURE_2D, gl->glTextures[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-        stbi_image_free(pixels);
-        fprintf(stderr, "GL: Loaded TXTR page %u (%dx%d)\n", i, w, h);
+        gl->textureWidths[i] = 0;
+        gl->textureHeights[i] = 0;
+        gl->textureLoaded[i] = false;
     }
 
     // Create 1x1 white pixel texture for primitive drawing (rectangles, lines, etc.)
@@ -234,6 +213,7 @@ static void glDestroy(Renderer* renderer) {
     free(gl->glTextures);
     free(gl->textureWidths);
     free(gl->textureHeights);
+    free(gl->textureLoaded);
     free(gl->vertexData);
     free(gl);
 }
@@ -340,6 +320,38 @@ static void glRendererFlush(Renderer* renderer) {
     flushBatch((GLRenderer*) renderer);
 }
 
+// Lazily decodes and uploads a TXTR page on first access.
+// Returns true if the texture is ready, false if it failed to decode.
+static bool ensureTextureLoaded(GLRenderer* gl, uint32_t pageId) {
+    if (gl->textureLoaded[pageId]) return (gl->textureWidths[pageId] != 0);
+
+    gl->textureLoaded[pageId] = true;
+
+    DataWin* dw = gl->base.dataWin;
+    Texture* txtr = &dw->txtr.textures[pageId];
+
+    int w, h, channels;
+    uint8_t* pixels = stbi_load_from_memory(txtr->blobData, (int) txtr->blobSize, &w, &h, &channels, 4);
+    if (pixels == nullptr) {
+        fprintf(stderr, "GL: Failed to decode TXTR page %u\n", pageId);
+        return false;
+    }
+
+    gl->textureWidths[pageId] = w;
+    gl->textureHeights[pageId] = h;
+
+    glBindTexture(GL_TEXTURE_2D, gl->glTextures[pageId]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    stbi_image_free(pixels);
+    fprintf(stderr, "GL: Loaded TXTR page %u (%dx%d)\n", pageId, w, h);
+    return true;
+}
+
 static void glDrawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha) {
     GLRenderer* gl = (GLRenderer*) renderer;
     DataWin* dw = renderer->dataWin;
@@ -349,11 +361,11 @@ static void glDrawSprite(Renderer* renderer, int32_t tpagIndex, float x, float y
     TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
     int16_t pageId = tpag->texturePageId;
     if (0 > pageId || gl->textureCount <= (uint32_t) pageId) return;
+    if (!ensureTextureLoaded(gl, (uint32_t) pageId)) return;
 
     GLuint texId = gl->glTextures[pageId];
     int32_t texW = gl->textureWidths[pageId];
     int32_t texH = gl->textureHeights[pageId];
-    if (texW == 0 || texH == 0) return;
 
     // Flush if texture changed or batch full
     if (gl->quadCount > 0 && gl->currentTextureId != texId) {
@@ -426,11 +438,11 @@ static void glDrawSpritePart(Renderer* renderer, int32_t tpagIndex, int32_t srcO
     TexturePageItem* tpag = &dw->tpag.items[tpagIndex];
     int16_t pageId = tpag->texturePageId;
     if (0 > pageId || gl->textureCount <= (uint32_t) pageId) return;
+    if (!ensureTextureLoaded(gl, (uint32_t) pageId)) return;
 
     GLuint texId = gl->glTextures[pageId];
     int32_t texW = gl->textureWidths[pageId];
     int32_t texH = gl->textureHeights[pageId];
-    if (texW == 0 || texH == 0) return;
 
     // Flush if texture changed or batch full
     if (gl->quadCount > 0 && gl->currentTextureId != texId) flushBatch(gl);
@@ -685,11 +697,11 @@ static bool glResolveFontState(GLRenderer* gl, DataWin* dw, Font* font, GlFontSt
         state->fontTpag = &dw->tpag.items[fontTpagIndex];
         int16_t pageId = state->fontTpag->texturePageId;
         if (0 > pageId || (uint32_t) pageId >= gl->textureCount) return false;
+        if (!ensureTextureLoaded(gl, (uint32_t) pageId)) return false;
 
         state->texId = gl->glTextures[pageId];
         state->texW = gl->textureWidths[pageId];
         state->texH = gl->textureHeights[pageId];
-        if (state->texW == 0 || state->texH == 0) return false;
     } else if (font->spriteIndex >= 0 && dw->sprt.count > (uint32_t) font->spriteIndex) {
         state->spriteFontSprite = &dw->sprt.sprites[font->spriteIndex];
     }
@@ -712,11 +724,11 @@ static bool glResolveGlyph(GLRenderer* gl, DataWin* dw, GlFontState* state, Font
         TexturePageItem* glyphTpag = &dw->tpag.items[tpagIdx];
         int16_t pid = glyphTpag->texturePageId;
         if (0 > pid || (uint32_t) pid >= gl->textureCount) return false;
+        if (!ensureTextureLoaded(gl, (uint32_t) pid)) return false;
 
         *outTexId = gl->glTextures[pid];
         int32_t tw = gl->textureWidths[pid];
         int32_t th = gl->textureHeights[pid];
-        if (tw == 0 || th == 0) return false;
 
         *outU0 = (float) glyphTpag->sourceX / (float) tw;
         *outV0 = (float) glyphTpag->sourceY / (float) th;
@@ -1042,9 +1054,11 @@ static uint32_t findOrAllocTexturePageSlot(GLRenderer* gl) {
     gl->glTextures = safeRealloc(gl->glTextures, gl->textureCount * sizeof(GLuint));
     gl->textureWidths = safeRealloc(gl->textureWidths, gl->textureCount * sizeof(int32_t));
     gl->textureHeights = safeRealloc(gl->textureHeights, gl->textureCount * sizeof(int32_t));
+    gl->textureLoaded = safeRealloc(gl->textureLoaded, gl->textureCount * sizeof(bool));
     gl->glTextures[newPageId] = 0;
     gl->textureWidths[newPageId] = 0;
     gl->textureHeights[newPageId] = 0;
+    gl->textureLoaded[newPageId] = false;
     return newPageId;
 }
 

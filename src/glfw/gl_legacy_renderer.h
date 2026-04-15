@@ -11,6 +11,7 @@ typedef struct {
     GLuint* glTextures;       // one GL texture per TXTR page
     int32_t* textureWidths;   // needed for UV normalization
     int32_t* textureHeights;
+    bool* textureLoaded;      // lazy loading: true once PNG decoded and uploaded
     uint32_t textureCount;
 
     GLuint whiteTexture; // 1x1 white pixel for drawing primitives (rectangles, lines, etc.)
