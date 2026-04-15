@@ -354,6 +354,7 @@ typedef struct {
     uint32_t textureOffset; // absolute file offset to TexturePageItem
     float scaleX;
     float scaleY;
+    int32_t ascenderOffset; // bytecodeVersion >= 17 only
     uint32_t glyphCount;
     FontGlyph* glyphs;
     // Sprite font fields (only valid when isSpriteFont is true)
@@ -562,6 +563,13 @@ typedef struct {
 } RoomLayerInstancesData;
 
 typedef struct {
+    int32_t backgroundIndex; // tileset (BGND index)
+    uint32_t tilesX; // grid width in tiles
+    uint32_t tilesY; // grid height in tiles
+    uint32_t* tileData; // flat array of tilesX * tilesY tile values (row-major)
+} RoomLayerTilesData;
+
+typedef struct {
     const char* name;
     uint32_t id;
     uint32_t type;
@@ -574,6 +582,7 @@ typedef struct {
     RoomLayerAssetsData *assetsData;
     RoomLayerBackgroundData *backgroundData;
     RoomLayerInstancesData *instancesData;
+    RoomLayerTilesData *tilesData;
 } RoomLayer;
 
 typedef struct {

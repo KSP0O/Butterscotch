@@ -768,6 +768,9 @@ static void parseFONT(BinaryReader* reader, DataWin* dw) {
         font->textureOffset = BinaryReader_readUint32(reader);
         font->scaleX = BinaryReader_readFloat32(reader);
         font->scaleY = BinaryReader_readFloat32(reader);
+        if (dw->gen8.bytecodeVersion >= 17) {
+            font->ascenderOffset = BinaryReader_readInt32(reader);
+        }
         font->isSpriteFont = false;
         font->spriteIndex = -1;
 
@@ -1131,6 +1134,7 @@ static void parseROOM(BinaryReader* reader, DataWin* dw) {
                         layer->assetsData = nullptr;
                         layer->backgroundData = nullptr;
                         layer->instancesData = nullptr;
+                        layer->tilesData = nullptr;
                         switch (layer->type) {
                             case RoomLayerType_Path:
                                 break; // Nothing to do;
@@ -1225,10 +1229,27 @@ static void parseROOM(BinaryReader* reader, DataWin* dw) {
                                 layer->instancesData = inst;
                                 break;
                             }
-                            default:
+                            case RoomLayerType_Tiles: {
+                                RoomLayerTilesData* tiles = malloc(sizeof(RoomLayerTilesData));
+                                tiles->backgroundIndex = BinaryReader_readInt32(reader);
+                                tiles->tilesX = BinaryReader_readUint32(reader);
+                                tiles->tilesY = BinaryReader_readUint32(reader);
+                                uint32_t totalTiles = tiles->tilesX * tiles->tilesY;
+                                if (totalTiles > 0) {
+                                    tiles->tileData = safeMalloc(totalTiles * sizeof(uint32_t));
+                                    repeat(totalTiles, k) {
+                                        tiles->tileData[k] = BinaryReader_readUint32(reader);
+                                    }
+                                } else {
+                                    tiles->tileData = nullptr;
+                                }
+                                layer->tilesData = tiles;
+                                break;
+                            }
+                            default: {
                                 fprintf(stderr, "Unsupported Room Layer Type %u\n", layer->type);
                                 exit(0);
-                                break;
+                            }
                         }
                     }
                 } else {
@@ -1639,6 +1660,18 @@ DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options) {
             parseROOM(&reader, dw);
         } else if (memcmp(chunkName, "DAFL", 4) == 0) {
             // Empty chunk, nothing to parse
+        } else if (memcmp(chunkName, "EMBI", 4) == 0) {
+            // Embedded Images chunk
+        } else if (memcmp(chunkName, "TGIN", 4) == 0) {
+            // Texture Group Info chunk (bytecodeVersion >= 17)
+        } else if (memcmp(chunkName, "ACRV", 4) == 0) {
+            // Animation Curves chunk (GMS 2.3+)
+        } else if (memcmp(chunkName, "SEQN", 4) == 0) {
+            // Sequences chunk (GMS 2.3+)
+        } else if (memcmp(chunkName, "TAGS", 4) == 0) {
+            // Tags chunk (GMS 2.3+)
+        } else if (memcmp(chunkName, "FEDS", 4) == 0) {
+            // Filter Effects Data chunk (GMS 2.3.6+)
         } else if (options.parseTpag && memcmp(chunkName, "TPAG", 4) == 0) {
             parseTPAG(&reader, dw);
         } else if (options.parseCode && memcmp(chunkName, "CODE", 4) == 0) {
@@ -1838,6 +1871,10 @@ void DataWin_free(DataWin* dw) {
                     if (layer->instancesData) {
                         free(layer->instancesData->instanceIds);
                         free(layer->instancesData);
+                    }
+                    if (layer->tilesData) {
+                        free(layer->tilesData->tileData);
+                        free(layer->tilesData);
                     }
                 }
                 free(dw->room.rooms[i].layers);
