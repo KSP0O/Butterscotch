@@ -909,6 +909,10 @@ void Runner_reset(Runner* runner) {
     runner->savedRoomStates = safeCalloc(runner->dataWin->room.count, sizeof(SavedRoomState));
     runner->audioSystem->vtable->stopAll(runner->audioSystem);
 
+    // Create the instance used for "self" in GLOB scripts
+    Instance_free(runner->globalScopeInstance);
+    runner->globalScopeInstance = Instance_create(0, -1, 0, 0);
+
     // Reset builtin function state
     runner->mpPotMaxrot = 30.0;
     runner->mpPotStep = 10.0;
@@ -989,7 +993,9 @@ void Runner_initFirstRoom(Runner* runner) {
 
     int32_t firstRoomIndex = dataWin->gen8.roomOrder[0];
 
-    // Run global init scripts first
+    // Run global init scripts with the global scope instance as "self"
+    // In GMS 2.3+ (BC17), GLOB scripts store function declarations on "self" via Pop.v.v
+    runner->vmContext->currentInstance = runner->globalScopeInstance;
     repeat(dataWin->glob.count, i) {
         int32_t codeId = dataWin->glob.codeIds[i];
         if (codeId >= 0 && dataWin->code.count > (uint32_t) codeId) {
@@ -998,6 +1004,7 @@ void Runner_initFirstRoom(Runner* runner) {
             RValue_free(&result);
         }
     }
+    runner->vmContext->currentInstance = nullptr;
 
     // Initialize the first room
     initRoom(runner, firstRoomIndex);
@@ -1960,5 +1967,6 @@ void Runner_free(Runner* runner) {
     cleanupState(runner);
 
     RunnerKeyboard_free(runner->keyboard);
+    Instance_free(runner->globalScopeInstance);
     free(runner);
 }

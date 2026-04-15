@@ -132,6 +132,11 @@ typedef struct Runner {
     struct { int key; Instance* value; }* instancesToId;
     bool isGMS2;
     bool forceDrawDepth;
+    // Dummy instance to serve as "self" during GLOB script execution
+    // In bytecode version 17+, global init scripts store method values on "self" via Pop.v.v
+    // The real runner uses a persistent YYObjectBase for this, the YYObjectBase is a "parent" of Instance
+    // For now, we'll use a dummy Instance with objectIndex = -1 as a hack
+    Instance* globalScopeInstance;
     int32_t forcedDepth;
 
     // ===[ Builtin function state ]===
