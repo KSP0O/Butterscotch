@@ -63,6 +63,47 @@ typedef struct {
     float offsetY;
 } TileLayerState;
 
+// Mutable background element on a dynamically-created layer (layer_background_create).
+// For parsed room layers, RoomLayerBackgroundData is used directly and this struct is unused.
+typedef struct {
+    int32_t spriteIndex; // SPRT index (-1 = none)
+    bool visible;
+    bool htiled;
+    bool vtiled;
+    bool stretch;
+    float xScale;
+    float yScale;
+    uint32_t blend; // BGR
+    float alpha;
+    float xOffset; // element-local offset (in addition to layer offset)
+    float yOffset;
+} RuntimeBackgroundElement;
+
+typedef enum {
+    RuntimeLayerElementType_Background = 1,
+} RuntimeLayerElementType;
+
+typedef struct {
+    uint32_t id;
+    RuntimeLayerElementType type;
+    RuntimeBackgroundElement* backgroundElement; // owned; nullptr if type != Background
+} RuntimeLayerElement;
+
+// Runtime-mutable state for a GMS2 room layer. Parsed layers are populated at room load from RoomLayer and share IDs with the parsed data.
+// Dynamic layers are created via layer_create and carry their own name + element list; they don't correspond to any RoomLayer.
+typedef struct {
+    uint32_t id;
+    int32_t depth;
+    bool visible;
+    float xOffset;
+    float yOffset;
+    float hSpeed;
+    float vSpeed;
+    bool dynamic; // true = created at runtime via layer_create
+    char* dynamicName; // owned; only populated for dynamic layers
+    RuntimeLayerElement* elements; // stb_ds array; only populated for dynamic layers
+} RuntimeLayer;
+
 // stb_ds hashmap entry: depth -> tile layer state
 typedef struct {
     int32_t key;
@@ -140,6 +181,7 @@ typedef struct {
     uint32_t backgroundColor;
     bool drawBackgroundColor;
     TileLayerMapEntry* tileLayerMap; // stb_ds hashmap: depth -> tile layer state
+    RuntimeLayer* runtimeLayers; // stb_ds array, index-parallel to currentRoom->layers
 } SavedRoomState;
 
 typedef struct Runner {
@@ -163,6 +205,8 @@ typedef struct Runner {
     bool shouldExit;
     bool debugMode;
     TileLayerMapEntry* tileLayerMap; // stb_ds hashmap: depth -> tile layer state
+    RuntimeLayer* runtimeLayers; // stb_ds array, index-parallel to currentRoom->layers for parsed entries; dynamic entries appended
+    uint32_t nextLayerId;        // counter for IDs of layers/elements created at runtime
     SavedRoomState* savedRoomStates; // array of size dataWin->room.count, for persistent room support
     float viewAngles[8]; // runtime-only view_angle per view (not stored in data.win)
     int32_t viewCurrent; // index of the view currently being drawn (for view_current)
@@ -221,3 +265,8 @@ void Runner_cleanupDestroyedInstances(Runner* runner);
 void Runner_dumpState(Runner* runner);
 char* Runner_dumpStateJson(Runner* runner);
 void Runner_free(Runner* runner);
+RuntimeLayer* Runner_findRuntimeLayerById(Runner* runner, int32_t id);
+RoomLayer* Runner_findRoomLayerById(Runner* runner, int32_t id);
+RuntimeLayerElement* Runner_findLayerElementById(Runner* runner, int32_t elementId, RuntimeLayer** outLayer);
+uint32_t Runner_getNextLayerId(Runner* runner);
+void Runner_freeRuntimeLayer(RuntimeLayer* runtimeLayer);

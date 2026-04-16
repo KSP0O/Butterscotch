@@ -5075,6 +5075,380 @@ static RValue builtinLayerGetForcedDepth(VMContext* ctx, MAYBE_UNUSED RValue* ar
     return RValue_makeReal((GMLReal) runner->forcedDepth);
 }
 
+// ===[ GMS2 Layer Runtime API ]===
+
+static RValue builtinLayerGetId(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    char* name = RValue_toString(args[0]);
+    if (name == nullptr) return RValue_makeReal(-1.0);
+    int32_t result = -1;
+    // Check dynamic layers first (they may shadow a parsed layer by name).
+    size_t runtimeLayerCount = arrlenu(runner->runtimeLayers);
+    repeat(runtimeLayerCount, i) {
+        RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
+        if (runtimeLayer->dynamic && runtimeLayer->dynamicName != nullptr && strcmp(runtimeLayer->dynamicName, name) == 0) {
+            result = (int32_t) runtimeLayer->id;
+            break;
+        }
+    }
+    if (result == -1 && runner->currentRoom != nullptr) {
+        repeat(runner->currentRoom->layerCount, i) {
+            RoomLayer* layer = &runner->currentRoom->layers[i];
+            if (layer->name != nullptr && strcmp(layer->name, name) == 0) {
+                result = (int32_t) layer->id;
+                break;
+            }
+        }
+    }
+    free(name);
+    return RValue_makeReal((GMLReal) result);
+}
+
+static RValue builtinLayerExists(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    return RValue_makeBool(Runner_findRuntimeLayerById(runner, id) != nullptr);
+}
+
+static RValue builtinLayerGetName(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr && runtimeLayer->dynamic && runtimeLayer->dynamicName != nullptr)
+        return RValue_makeString(runtimeLayer->dynamicName);
+
+    RoomLayer* roomLayer = Runner_findRoomLayerById(runner, id);
+    if (roomLayer == nullptr || roomLayer->name == nullptr)
+        return RValue_makeString("");
+
+    return RValue_makeString(roomLayer->name);
+}
+
+static RValue builtinLayerGetDepth(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeUndefined();
+
+    return RValue_makeReal((GMLReal) runtimeLayer->depth);
+}
+
+static RValue builtinLayerDepth(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    int32_t depth = RValue_toInt32(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr)
+        runtimeLayer->depth = depth;
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetVisible(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeBool(false);
+
+    return RValue_makeBool(runtimeLayer->visible);
+}
+
+static RValue builtinLayerSetVisible(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    bool visible = RValue_toBool(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr)
+        runtimeLayer->visible = visible;
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetX(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeReal(0.0);
+
+    return RValue_makeReal((GMLReal) runtimeLayer->xOffset);
+}
+
+static RValue builtinLayerX(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    float x = (float) RValue_toReal(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr)
+        runtimeLayer->xOffset = x;
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetY(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeReal(0.0);
+
+    return RValue_makeReal((GMLReal) runtimeLayer->yOffset);
+}
+
+static RValue builtinLayerY(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    float y = (float) RValue_toReal(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr)
+        runtimeLayer->yOffset = y;
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetHspeed(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeReal(0.0);
+
+    return RValue_makeReal((GMLReal) runtimeLayer->hSpeed);
+}
+
+static RValue builtinLayerHspeed(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    float hs = (float) RValue_toReal(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr)
+        runtimeLayer->hSpeed = hs;
+
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetVspeed(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer == nullptr)
+        return RValue_makeReal(0.0);
+
+    return RValue_makeReal((GMLReal) runtimeLayer->vSpeed);
+}
+
+// Creates a new dynamic layer. Signatures: layer_create(depth) or layer_create(depth, name).
+static RValue builtinLayerCreate(VMContext* ctx, RValue* args, int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t depth = RValue_toInt32(args[0]);
+    char* name = nullptr;
+    if (argCount > 1) {
+        name = RValue_toString(args[1]);
+    }
+    uint32_t id = Runner_getNextLayerId(runner);
+    RuntimeLayer runtimeLayer = {
+        .id = id,
+        .depth = depth,
+        .visible = true,
+        .xOffset = 0.0f, .yOffset = 0.0f,
+        .hSpeed = 0.0f, .vSpeed = 0.0f,
+        .dynamic = true,
+        .dynamicName = name, // ownership transferred (nullptr if not provided)
+        .elements = nullptr,
+    };
+    arrput(runner->runtimeLayers, runtimeLayer);
+    return RValue_makeReal((GMLReal) id);
+}
+
+static RValue builtinLayerDestroy(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    size_t count = arrlenu(runner->runtimeLayers);
+    repeat(count, i) {
+        if ((int32_t) runner->runtimeLayers[i].id != id)
+            continue;
+
+        // Ignore if we are trying to delete a non-dynamic layer
+        if (!runner->runtimeLayers[i].dynamic)
+            return RValue_makeUndefined();
+
+        Runner_freeRuntimeLayer(&runner->runtimeLayers[i]);
+        arrdel(runner->runtimeLayers, i);
+        break;
+    }
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundCreate(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t layerId = RValue_toInt32(args[0]);
+    int32_t spriteIndex = RValue_toInt32(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, layerId);
+    if (runtimeLayer == nullptr)
+        return RValue_makeReal(-1.0);
+
+    RuntimeBackgroundElement* bg = safeMalloc(sizeof(RuntimeBackgroundElement));
+    bg->spriteIndex = spriteIndex;
+    bg->visible = true;
+    bg->htiled = false;
+    bg->vtiled = false;
+    bg->stretch = false;
+    bg->xScale = 1.0f;
+    bg->yScale = 1.0f;
+    bg->blend = 0xFFFFFF;
+    bg->alpha = 1.0f;
+    bg->xOffset = 0.0f;
+    bg->yOffset = 0.0f;
+    RuntimeLayerElement el = {
+        .id = Runner_getNextLayerId(runner),
+        .type = RuntimeLayerElementType_Background,
+        .backgroundElement = bg,
+    };
+    arrput(runtimeLayer->elements, el);
+    return RValue_makeReal((GMLReal) el.id);
+}
+
+static RValue builtinLayerBackgroundExists(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t layerId = RValue_toInt32(args[0]);
+    int32_t elementId = RValue_toInt32(args[1]);
+
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, layerId);
+    if (runtimeLayer == nullptr)
+        return RValue_makeBool(false);
+
+    size_t count = arrlenu(runtimeLayer->elements);
+    repeat(count, i) {
+        if ((int32_t) runtimeLayer->elements[i].id == elementId && runtimeLayer->elements[i].type == RuntimeLayerElementType_Background) {
+            return RValue_makeBool(true);
+        }
+    }
+    return RValue_makeBool(false);
+}
+
+static RuntimeBackgroundElement* findBackgroundElement(Runner* runner, int32_t elementId) {
+    RuntimeLayerElement* el = Runner_findLayerElementById(runner, elementId, nullptr);
+    if (el == nullptr || el->type != RuntimeLayerElementType_Background)
+        return nullptr;
+    return el->backgroundElement;
+}
+
+static RValue builtinLayerBackgroundVisible(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->visible = RValue_toBool(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundHtiled(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->htiled = RValue_toBool(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundVtiled(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->vtiled = RValue_toBool(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundXscale(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->xScale = (float) RValue_toReal(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundYscale(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->yScale = (float) RValue_toReal(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundStretch(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->stretch = RValue_toBool(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundBlend(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->blend = (uint32_t) RValue_toInt32(args[1]) & 0x00FFFFFF;
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerBackgroundAlpha(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RuntimeBackgroundElement* bg = findBackgroundElement(runner, RValue_toInt32(args[0]));
+    if (bg != nullptr)
+        bg->alpha = (float) RValue_toReal(args[1]);
+    return RValue_makeUndefined();
+}
+
+static RValue builtinLayerGetAll(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    RValue arr = VM_createArray(ctx);
+    int32_t i = 0;
+    size_t count = arrlenu(runner->runtimeLayers);
+    repeat(count, layerIndex) {
+        VM_arraySet(ctx, &arr, i++, RValue_makeReal((GMLReal) runner->runtimeLayers[layerIndex].id));
+    }
+    return arr;
+}
+
+static RValue builtinLayerGetIdAtDepth(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t targetDepth = RValue_toInt32(args[0]);
+    RValue arr = VM_createArray(ctx);
+    int32_t i = 0;
+    size_t count = arrlenu(runner->runtimeLayers);
+    repeat(count, layerIndex) {
+        if (runner->runtimeLayers[layerIndex].depth == targetDepth) {
+            VM_arraySet(ctx, &arr, i++, RValue_makeReal((GMLReal) runner->runtimeLayers[layerIndex].id));
+        }
+    }
+    // When no layer matches, return [-1] instead of an empty array.
+    if (i == 0)
+        VM_arraySet(ctx, &arr, 0, RValue_makeReal(-1.0));
+    return arr;
+}
+
+static RValue builtinLayerVspeed(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    int32_t id = RValue_toInt32(args[0]);
+    float vs = (float) RValue_toReal(args[1]);
+    RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
+    if (runtimeLayer != nullptr) runtimeLayer->vSpeed = vs;
+    return RValue_makeUndefined();
+}
+
 // ===[ Array Functions ]===
 
 // @@NewGMLArray@@ - GMS2 internal function to create a new empty array.
@@ -5779,6 +6153,35 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "layer_force_draw_depth", builtinLayerForceDrawDepth);
     VM_registerBuiltin(ctx, "layer_is_draw_depth_forced", builtinLayerIsDrawDepthForced);
     VM_registerBuiltin(ctx, "layer_get_forced_depth", builtinLayerGetForcedDepth);
+    VM_registerBuiltin(ctx, "layer_get_id", builtinLayerGetId);
+    VM_registerBuiltin(ctx, "layer_exists", builtinLayerExists);
+    VM_registerBuiltin(ctx, "layer_get_name", builtinLayerGetName);
+    VM_registerBuiltin(ctx, "layer_get_depth", builtinLayerGetDepth);
+    VM_registerBuiltin(ctx, "layer_depth", builtinLayerDepth);
+    VM_registerBuiltin(ctx, "layer_get_visible", builtinLayerGetVisible);
+    VM_registerBuiltin(ctx, "layer_set_visible", builtinLayerSetVisible);
+    VM_registerBuiltin(ctx, "layer_get_x", builtinLayerGetX);
+    VM_registerBuiltin(ctx, "layer_x", builtinLayerX);
+    VM_registerBuiltin(ctx, "layer_get_y", builtinLayerGetY);
+    VM_registerBuiltin(ctx, "layer_y", builtinLayerY);
+    VM_registerBuiltin(ctx, "layer_get_hspeed", builtinLayerGetHspeed);
+    VM_registerBuiltin(ctx, "layer_hspeed", builtinLayerHspeed);
+    VM_registerBuiltin(ctx, "layer_get_vspeed", builtinLayerGetVspeed);
+    VM_registerBuiltin(ctx, "layer_vspeed", builtinLayerVspeed);
+    VM_registerBuiltin(ctx, "layer_get_all", builtinLayerGetAll);
+    VM_registerBuiltin(ctx, "layer_get_id_at_depth", builtinLayerGetIdAtDepth);
+    VM_registerBuiltin(ctx, "layer_create", builtinLayerCreate);
+    VM_registerBuiltin(ctx, "layer_destroy", builtinLayerDestroy);
+    VM_registerBuiltin(ctx, "layer_background_create", builtinLayerBackgroundCreate);
+    VM_registerBuiltin(ctx, "layer_background_exists", builtinLayerBackgroundExists);
+    VM_registerBuiltin(ctx, "layer_background_visible", builtinLayerBackgroundVisible);
+    VM_registerBuiltin(ctx, "layer_background_htiled", builtinLayerBackgroundHtiled);
+    VM_registerBuiltin(ctx, "layer_background_vtiled", builtinLayerBackgroundVtiled);
+    VM_registerBuiltin(ctx, "layer_background_xscale", builtinLayerBackgroundXscale);
+    VM_registerBuiltin(ctx, "layer_background_yscale", builtinLayerBackgroundYscale);
+    VM_registerBuiltin(ctx, "layer_background_stretch", builtinLayerBackgroundStretch);
+    VM_registerBuiltin(ctx, "layer_background_blend", builtinLayerBackgroundBlend);
+    VM_registerBuiltin(ctx, "layer_background_alpha", builtinLayerBackgroundAlpha);
 
     // GMS2 internal
     VM_registerBuiltin(ctx, "@@NewGMLArray@@", builtinNewGMLArray);

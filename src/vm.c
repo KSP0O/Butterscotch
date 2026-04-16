@@ -265,6 +265,21 @@ static int32_t resolveArrayAliasHm(SelfVarEntry* vars, int32_t varID) {
     return current;
 }
 
+// Allocates a fresh synthetic varID and returns a global-scope GML array reference that points at it.
+// Use VM_arraySet to populate entries. Used by builtins that need to return arrays (layer_get_all, ds_list_create-adjacent helpers).
+// Entries live in the global array map until VM_free.
+RValue VM_createArray(VMContext* ctx) {
+    int32_t varID = nextSyntheticVarID++;
+    hmput(ctx->globalArrayVarTracker, varID, 1);
+    return RValue_makeGMLArray(varID, INSTANCE_GLOBAL);
+}
+
+void VM_arraySet(VMContext* ctx, RValue* arrayRef, int32_t index, RValue val) {
+    require(arrayRef->type == RVALUE_GML_ARRAY);
+    require(arrayRef->gmlArray.scope == INSTANCE_GLOBAL);
+    arrayMapSet(&ctx->globalArrayMap, arrayRef->gmlArray.varID, index, val);
+}
+
 // ===[ GML Array Reference Helpers (V17+) ]===
 // These resolve a RVALUE_GML_ARRAY to the appropriate array map based on scope,
 // then read/write elements by index.
