@@ -1839,6 +1839,12 @@ static void handlePushEnv(VMContext* ctx, uint32_t instr, uint32_t instrAddr) {
     RValue targetVal = stackPop(ctx);
     int32_t target = RValue_toInt32(targetVal);
     RValue_free(&targetVal);
+    // BC17: -9 (INSTANCE_STACKTOP) means "pop again for the real target"
+    if (target == INSTANCE_STACKTOP) {
+        RValue realTarget = stackPop(ctx);
+        target = RValue_toInt32(realTarget);
+        RValue_free(&realTarget);
+    }
 
     // Create env frame, save current context
     EnvFrame* frame = safeMalloc(sizeof(EnvFrame));
