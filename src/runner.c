@@ -80,6 +80,8 @@ static void executeCode(Runner* runner, Instance* instance, int32_t codeId) {
     RValue* savedLocalVars = vm->localVars;
     uint32_t savedLocalVarCount = vm->localVarCount;
     ArrayMapEntry* savedLocalArrayMap = vm->localArrayMap;
+    CodeLocals* savedCodeLocals = vm->currentCodeLocals;
+    LocalSlotEntry* savedCodeLocalsSlotMap = vm->currentCodeLocalsSlotMap;
     int32_t savedStackTop = vm->stack.top;
 
     // Save stack values (VM_executeCode resets stack.top to 0, which would let
@@ -108,6 +110,8 @@ static void executeCode(Runner* runner, Instance* instance, int32_t codeId) {
     vm->localVars = savedLocalVars;
     vm->localVarCount = savedLocalVarCount;
     vm->localArrayMap = savedLocalArrayMap;
+    vm->currentCodeLocals = savedCodeLocals;
+    vm->currentCodeLocalsSlotMap = savedCodeLocalsSlotMap;
     vm->stack.top = savedStackTop;
 
     // Restore stack values

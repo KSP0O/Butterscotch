@@ -108,6 +108,14 @@ typedef struct {
     int32_t scriptCodeIndex; // cached script code index, or -1 if not a script
 } FuncCallCache;
 
+// ===[ LocalSlotEntry - varID -> localVars slot index (Bytecode Version 17+) ]===
+// stb_ds hmap entry layout: one per CodeLocals, keyed by the local's shared varID (== CodeLocals.locals[i].index).
+// Value is the slot position i within that code's localVars.
+typedef struct {
+    int32_t key;
+    uint32_t value;
+} LocalSlotEntry;
+
 // ===[ CallFrame - Saved state for script-to-script calls ]===
 typedef struct CallFrame {
     uint32_t savedIP;
@@ -118,6 +126,7 @@ typedef struct CallFrame {
     const char* savedCodeName;
     ArrayMapEntry* savedLocalArrayMap;
     CodeLocals* savedCodeLocals;
+    LocalSlotEntry* savedCodeLocalsSlotMap;
     RValue* savedScriptArgs;
     int32_t savedScriptArgCount;
     int32_t savedCurrentCodeIndex;
@@ -171,6 +180,9 @@ typedef struct VMContext {
     struct Runner* runner;
     ArrayMapEntry* localArrayMap;
     CodeLocals* currentCodeLocals;
+    // BC17+: varID -> localVars slot lookup for the current code.
+    // Points into codeLocalsSlotMaps, parallel to currentCodeLocals. Stays in sync with it.
+    LocalSlotEntry* currentCodeLocalsSlotMap;
     ArrayMapEntry* globalArrayMap;
     FuncCallCache* funcCallCache;
     const char* currentCodeName;
@@ -209,6 +221,10 @@ typedef struct VMContext {
     struct { char* key; int32_t value; }* funcMap;
     // codeName -> CodeLocals* hash map (stb_ds)
     struct { char* key; CodeLocals* value; }* codeLocalsMap;
+    // BC17+: parallel to dataWin->func.codeLocals[]. Each element is a hmap keyed by the local's CodeLocals.locals[i].index (== its shared varID), mapping to the slot position i
+    // within that code's localVars array. Built once in VM_create and read O(1) at dispatch time.
+    // In BC17, a single GML local can surface as several VARI chunk entries that share varID, so we key by varID (not VARI chunk index) to unify them to a single slot.
+    LocalSlotEntry** codeLocalsSlotMaps;
     // varName -> varID hash map for global variables (stb_ds)
     struct { char* key; int32_t value; }* globalVarNameMap;
     // "codeName\tfuncName" -> true, for deduplicating unknown function warnings

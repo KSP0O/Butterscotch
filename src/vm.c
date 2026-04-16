@@ -423,19 +423,19 @@ static Variable* resolveVarDef(VMContext* ctx, uint32_t varRef) {
     return varDef;
 }
 
-// In bytecode version 17+, local variable varIDs are VARI chunk indices (e.g. 11935), not sequential slot indices (0, 1, 2...).
-// This function maps a varID to the correct local slot index by scanning the current CodeLocals table.
-// In earlier bytecode versions, varIDs are already sequential, so we return them as-is.
+// Maps a GML local's varID to its slot position in the current code's localVars array.
+//
+// BC16: varIDs for locals are already sequential slot indices (0, 1, 2, ...), so we return the varID unchanged.
+//
+// BC17+: a single GML local (e.g. "menu") can be multiple VARI chunk entries that share a varID.
+// (one for "local.menu" direct access, another for "self.menu [Array]" when the scope is pushed on the stack at runtime).
+// We key by that shared varID via the precomputed currentCodeLocalsSlotMap, so writes and reads via different VARI entries agree on the slot.
 static uint32_t resolveLocalSlot(VMContext* ctx, int32_t varID) {
-    if (17 > ctx->dataWin->gen8.bytecodeVersion || ctx->currentCodeLocals == nullptr) {
+    if (16 >= ctx->dataWin->gen8.bytecodeVersion || ctx->currentCodeLocalsSlotMap == nullptr) {
         return (uint32_t) varID;
     }
-    CodeLocals* cl = ctx->currentCodeLocals;
-    repeat(cl->localVarCount, i) {
-        if (cl->locals[i].index == (uint32_t) varID) {
-            return i;
-        }
-    }
+    ptrdiff_t idx = hmgeti(ctx->currentCodeLocalsSlotMap, varID);
+    if (idx >= 0) return ctx->currentCodeLocalsSlotMap[idx].value;
     fprintf(stderr, "VM: Local varID %d not found in CodeLocals for '%s'\n", varID, ctx->currentCodeName);
     abort();
 }
@@ -2455,6 +2455,20 @@ VMContext* VM_create(DataWin* dataWin) {
         }
     }
 
+    // BC17+: build per-CodeLocals varID -> slot hmap so resolveLocalSlot is O(1)
+    ctx->codeLocalsSlotMaps = nullptr;
+    if (dataWin->gen8.bytecodeVersion >= 17 && dataWin->func.codeLocalsCount > 0) {
+        ctx->codeLocalsSlotMaps = safeCalloc(dataWin->func.codeLocalsCount, sizeof(*ctx->codeLocalsSlotMaps));
+        repeat(dataWin->func.codeLocalsCount, clIdx) {
+            CodeLocals* cl = &dataWin->func.codeLocals[clIdx];
+            LocalSlotEntry* slotMap = nullptr;
+            repeat(cl->localVarCount, i) {
+                hmput(slotMap, (int32_t) cl->locals[i].index, (uint32_t) i);
+            }
+            ctx->codeLocalsSlotMaps[clIdx] = slotMap;
+        }
+    }
+
     // Register built-in functions
     VMBuiltins_registerAll(ctx, dataWin->gen8.major >= 2);
 
@@ -2537,6 +2551,7 @@ void VM_reset(VMContext* ctx) {
     ctx->localVars = nullptr;
     ctx->localVarCount = 0;
     ctx->currentCodeLocals = nullptr;
+    ctx->currentCodeLocalsSlotMap = nullptr;
     ctx->actionRelativeFlag = false;
 
     fprintf(stderr, "VM: Reset complete (%u global vars cleared)\n", ctx->globalVarCount);
@@ -2544,6 +2559,18 @@ void VM_reset(VMContext* ctx) {
 
 static CodeLocals* resolveCodeLocals(VMContext* ctx, const char* codeName) {
     return shget(ctx->codeLocalsMap, (char*) codeName);
+}
+
+// Sets currentCodeLocals and keeps currentCodeLocalsSlotMap in sync. Must be used everywhere currentCodeLocals is written so resolveLocalSlot always sees the matching varID -> slot map.
+static void setCurrentCodeLocals(VMContext* ctx, CodeLocals* codeLocals) {
+    ctx->currentCodeLocals = codeLocals;
+    if (codeLocals != nullptr && ctx->codeLocalsSlotMaps != nullptr) {
+        // codeLocals points into dataWin->func.codeLocals[]; same index selects the slot map.
+        ptrdiff_t codeLocalsIdx = codeLocals - ctx->dataWin->func.codeLocals;
+        ctx->currentCodeLocalsSlotMap = ctx->codeLocalsSlotMaps[codeLocalsIdx];
+    } else {
+        ctx->currentCodeLocalsSlotMap = nullptr;
+    }
 }
 
 RValue VM_executeCode(VMContext* ctx, int32_t codeIndex) {
@@ -2557,7 +2584,7 @@ RValue VM_executeCode(VMContext* ctx, int32_t codeIndex) {
     ctx->currentCodeIndex = codeIndex;
 
     // Resolve CodeLocals for local variable slot mapping
-    ctx->currentCodeLocals = resolveCodeLocals(ctx, code->name);
+    setCurrentCodeLocals(ctx, resolveCodeLocals(ctx, code->name));
 
     // Allocate locals - CodeLocals is the authoritative source for local variable count NOT code->localsCount
     uint32_t localsCount = ctx->currentCodeLocals->localVarCount;
@@ -2605,6 +2632,7 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
         .savedCodeName = ctx->currentCodeName,
         .savedLocalArrayMap = ctx->localArrayMap,
         .savedCodeLocals = ctx->currentCodeLocals,
+        .savedCodeLocalsSlotMap = ctx->currentCodeLocalsSlotMap,
         .savedScriptArgs = ctx->scriptArgs,
         .savedScriptArgCount = ctx->scriptArgCount,
         .savedCurrentCodeIndex = ctx->currentCodeIndex,
@@ -2619,7 +2647,7 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
     ctx->codeEnd = code->length;
     ctx->currentCodeName = code->name;
     ctx->currentCodeIndex = codeIndex;
-    ctx->currentCodeLocals = resolveCodeLocals(ctx, code->name);
+    setCurrentCodeLocals(ctx, resolveCodeLocals(ctx, code->name));
     ctx->localArrayMap = nullptr;
 
     // We use fixed-size arrays instead of VLAs because it seems that using multiple VLAs in a single function things get corrupted somehow?
@@ -2680,6 +2708,7 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
     ctx->localVarCount = saved->savedLocalsCount;
     ctx->localArrayMap = saved->savedLocalArrayMap;
     ctx->currentCodeLocals = saved->savedCodeLocals;
+    ctx->currentCodeLocalsSlotMap = saved->savedCodeLocalsSlotMap;
     ctx->scriptArgs = saved->savedScriptArgs;
     ctx->scriptArgCount = saved->savedScriptArgCount;
     ctx->currentCodeName = saved->savedCodeName;
@@ -3295,6 +3324,15 @@ void VM_free(VMContext* ctx) {
     // Free V17+ static tracking
     free(ctx->staticInitialized);
     RValue_free(&ctx->savedArrayRef);
+
+    // Free per-CodeLocals varID -> slot maps (BC17+ only; nullptr otherwise)
+    if (ctx->codeLocalsSlotMaps != nullptr) {
+        repeat(ctx->dataWin->func.codeLocalsCount, i) {
+            hmfree(ctx->codeLocalsSlotMaps[i]);
+        }
+        free(ctx->codeLocalsSlotMaps);
+        ctx->codeLocalsSlotMaps = nullptr;
+    }
 
 #ifndef PLATFORM_PS2
     free(ctx);
