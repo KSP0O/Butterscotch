@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
+
+#include "utils.h"
 
 // Forward declaration for progress callback
 typedef struct DataWin DataWin;
@@ -34,6 +37,12 @@ typedef struct {
     bool parseAudo;
     // If true, precise masks will be skipped when the sprite does not have a precise state set
     bool skipLoadingPreciseMasksForNonPreciseSprites;
+
+    // If true, Room payloads (backgrounds, views, gameObjects, tiles, layers) are parsed on demand via DataWin_loadRoomPayload during gameplay.
+    bool lazyLoadRooms;
+
+    // When lazyLoadRooms is true, this list indicates which rooms should be loaded during load time instead of demand. They will also not be freed.
+    StringBooleanEntry* eagerlyLoadedRooms;
 
     // Optional progress callback, called before each chunk is parsed.
     // chunkName: 4-character chunk name (e.g. "GEN8", "SPRT")
@@ -589,6 +598,7 @@ typedef struct {
 } RoomLayer;
 
 typedef struct {
+    // Scalar header: always valid regardless of payloadLoaded.
     const char* name;
     const char* caption;
     uint32_t width;
@@ -607,8 +617,20 @@ typedef struct {
     float gravityX;
     float gravityY;
     float metersPerPixel;
-    RoomBackground backgrounds[8];
-    RoomView views[8];
+
+    // Lazy-load offsets: absolute file offsets to the PointerList head for each payload section.
+    // Captured during the header pass of parseROOM so DataWin_loadRoomPayload can seek directly.
+    uint32_t backgroundsFileOffset;
+    uint32_t viewsFileOffset;
+    uint32_t gameObjectsFileOffset;
+    uint32_t tilesFileOffset;
+    uint32_t layersFileOffset; // 0 if pre-GMS2
+    bool payloadLoaded;
+    bool eagerlyLoaded; // set if this room's name matched DataWinParserOptions.eagerlyLoadedRooms; payload is preserved across transitions
+
+    // Payload: valid only when payloadLoaded is true. Zeroed/null otherwise. Backgrounds/views point to a heap array of 8 entries when loaded.
+    RoomBackground* backgrounds;
+    RoomView* views;
     uint32_t gameObjectCount;
     RoomGameObject* gameObjects;
     uint32_t tileCount;
@@ -785,11 +807,21 @@ typedef struct DataWin {
     struct { uint32_t key; int32_t value; }* tpagOffsetMap;
     // Lookup map: absolute file offset -> SPRT index (built during SPRT parsing)
     struct { uint32_t key; int32_t value; }* sprtOffsetMap;
+
+    // Held open across the whole session when DataWinParserOptions.lazyLoadRooms is true.
+    // Used by DataWin_loadRoomPayload to satisfy on-demand room payload reads.
+    // nullptr when lazy loading is disabled. Closed by DataWin_free.
+    FILE* lazyLoadFile;
+    char* lazyLoadFilePath;     // owned strdup of the original file path, for diagnostics
+    bool lazyLoadRooms;          // mirrors the parser option so Runner can branch without re-reading options
 } DataWin;
 
 DataWin* DataWin_parse(const char* filePath, DataWinParserOptions options);
 void DataWin_free(DataWin* dataWin);
 void DataWin_printDebugSummary(DataWin* dataWin);
+// Lazy room payload management. DataWin_loadRoomPayload is a no-op when the payload is already loaded.
+void DataWin_loadRoomPayload(DataWin* dw, int32_t roomIndex);
+void DataWin_freeRoomPayload(Room* room);
 int32_t DataWin_resolveTPAG(DataWin* dw, uint32_t offset);
 int32_t DataWin_resolveSPRT(DataWin* dw, uint32_t offset);
 // Compares the detected effective GMS version (not the raw GEN8 version) against a lower bound.

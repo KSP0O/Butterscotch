@@ -744,6 +744,12 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
     require(roomIndex >= 0 && dataWin->room.count > (uint32_t) roomIndex);
 
     Room* room = &dataWin->room.rooms[roomIndex];
+
+    // Lazy-room load: if the payload wasn't loaded, read it from the data.win file now before anything touches the room's game objects/tiles/layers.
+    if (!room->payloadLoaded) {
+        DataWin_loadRoomPayload(dataWin, roomIndex);
+    }
+
     SavedRoomState* savedState = &runner->savedRoomStates[roomIndex];
 
     runner->currentRoom = room;
@@ -1704,6 +1710,10 @@ void Runner_step(Runner* runner) {
     // Handle game restart
     if (runner->pendingRoom == ROOM_RESTARTGAME) {
         // See you soon!
+        // Free the currently-loaded non-eager room before reset so lazyLoadRooms stays steady-state.
+        if (runner->dataWin->lazyLoadRooms && runner->currentRoom != nullptr && !runner->currentRoom->eagerlyLoaded) {
+            DataWin_freeRoomPayload(runner->currentRoom);
+        }
         Runner_reset(runner);
         Runner_initFirstRoom(runner);
         runner->frameCount++;
@@ -1773,6 +1783,11 @@ void Runner_step(Runner* runner) {
             runner->runtimeLayers = nullptr;
 
             state->initialized = true;
+        }
+
+        // Free the outgoing room's payload under lazyLoadRooms, unless it's eagerly pinned or we're restarting the same room (initRoom would just re-load it).
+        if (runner->dataWin->lazyLoadRooms && !oldRoom->eagerlyLoaded && newRoomIndex != oldRoomIndex) {
+            DataWin_freeRoomPayload(oldRoom);
         }
 
         // Load new room

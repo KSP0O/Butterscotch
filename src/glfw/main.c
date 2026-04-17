@@ -71,6 +71,8 @@ typedef struct {
     const char* recordInputsPath;
     const char* playbackInputsPath;
     const char* renderer;
+    bool lazyRooms;
+    StringBooleanEntry* eagerRooms; // stb_ds string-keyed set of room names
 } CommandLineArgs;
 
 static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) {
@@ -107,6 +109,8 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
         {"record-inputs", required_argument, nullptr, 'I'},
         {"playback-inputs", required_argument, nullptr, 'P'},
         {"renderer", required_argument, nullptr, 'g'},
+        {"lazy-rooms", no_argument, nullptr, 'z'},
+        {"eager-room", required_argument, nullptr, 'G'},
         {nullptr,               0,                 nullptr,  0 }
     };
 
@@ -233,6 +237,12 @@ static void parseCommandLineArgs(CommandLineArgs* args, int argc, char* argv[]) 
                 break;
             case 'g':
                 args->renderer = optarg;
+                break;
+            case 'z':
+                args->lazyRooms = true;
+                break;
+            case 'G':
+                shput(args->eagerRooms, optarg, true);
                 break;
             case 'A':
                 shput(args->disassemble, optarg, true);
@@ -446,7 +456,9 @@ int main(int argc, char* argv[]) {
             .parseStrg = true,
             .parseTxtr = true,
             .parseAudo = true,
-            .skipLoadingPreciseMasksForNonPreciseSprites = true
+            .skipLoadingPreciseMasksForNonPreciseSprites = true,
+            .lazyLoadRooms = args.lazyRooms,
+            .eagerlyLoadedRooms = args.eagerRooms
         }
     );
 
@@ -474,7 +486,15 @@ int main(int argc, char* argv[]) {
     }
 
     if (args.printRooms) {
+        // Under --lazy-rooms we load each room for display and then free it again so the dump
+        // reflects what each room contains without keeping all of them resident simultaneously.
         forEachIndexed(Room, room, idx, dataWin->room.rooms, dataWin->room.count) {
+            bool loadedHere = false;
+            if (!room->payloadLoaded) {
+                DataWin_loadRoomPayload(dataWin, (int32_t) idx);
+                loadedHere = true;
+            }
+
             printf("[%d] %s ()\n", idx, room->name);
 
             forEachIndexed(RoomGameObject, roomGameObject, idx2, room->gameObjects, room->gameObjectCount) {
@@ -491,6 +511,10 @@ int main(int argc, char* argv[]) {
                     roomGameObject->preCreateCode,
                     roomGameObject->creationCode
                 );
+            }
+
+            if (loadedHere && !room->eagerlyLoaded) {
+                DataWin_freeRoomPayload(room);
             }
         }
         VM_free(vm);

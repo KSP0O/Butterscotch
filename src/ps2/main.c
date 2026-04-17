@@ -26,6 +26,7 @@
 #include "gs_renderer.h"
 #include "noop_audio_system.h"
 #include "ps2_utils.h"
+#include "stb_ds.h"
 #include "utils.h"
 
 #ifdef GPROF_PROFILING
@@ -454,6 +455,42 @@ int main(int argc, char* argv[]) {
         .gsFontM = gsFontM,
     };
 
+    // ===[ Load CONFIG.JSN ]===
+    drawStatusScreen(gsGlobal, gsFontM, nullptr, "Loading CONFIG.JSN...", nullptr);
+
+    char* configJsonPath = PS2Utils_createDevicePath("CONFIG.JSN");
+    FILE* configFile = fopen(configJsonPath, "rb");
+    JsonValue* configRoot = nullptr;
+
+    if (configFile != nullptr) {
+        fseek(configFile, 0, SEEK_END);
+        long configSize = ftell(configFile);
+        fseek(configFile, 0, SEEK_SET);
+
+        char* configJsonText = safeMalloc((size_t) configSize + 1);
+        size_t configBytesRead = fread(configJsonText, 1, (size_t) configSize, configFile);
+        configJsonText[configBytesRead] = '\0';
+        fclose(configFile);
+
+        configRoot = JsonReader_parse(configJsonText);
+        free(configJsonText);
+    }
+    free(configJsonPath);
+
+    if (configRoot == nullptr) {
+        drawStatusScreen(gsGlobal, gsFontM, nullptr, "CONFIG.JSN invalid or not found!", nullptr);
+        while (true) {}
+    }
+
+    bool lazyLoadRooms = JsonReader_getBool(JsonReader_getObject(configRoot, "lazyLoadRooms"));
+    StringBooleanEntry* eagerRooms = nullptr; // stb_ds string-keyed set; keys borrowed from configRoot
+    JsonValue* eagerArr = JsonReader_getObject(configRoot, "eagerlyLoadedRooms");
+    int n = JsonReader_arrayLength(eagerArr);
+    repeat(n, i) {
+        const char* name = JsonReader_getString(JsonReader_getArrayElement(eagerArr, i));
+        if (name != nullptr) shput(eagerRooms, (char*) name, true);
+    }
+
     // ===[ Parse data.win ]===
     drawStatusScreen(gsGlobal, gsFontM, nullptr, "Loading data.win...", nullptr);
 
@@ -484,44 +521,20 @@ int main(int argc, char* argv[]) {
             .parseTxtr = false,
             .parseAudo = false,
             .skipLoadingPreciseMasksForNonPreciseSprites = true,
+            .lazyLoadRooms = lazyLoadRooms,
+            .eagerlyLoadedRooms = eagerRooms,
             .progressCallback = loadingScreenCallback,
             .progressCallbackUserData = &loadingState,
         }
     );
     free(dataWinPath);
+    shfree(eagerRooms);
 
     {
         void* heapTop = sbrk(0);
         int32_t usedBytes = (int32_t) (uintptr_t) heapTop;
         int32_t freeBytes = MAX_MEMORY_BYTES - usedBytes;
         printf("Memory after data.win parsing: used=%d bytes (%.1f KB), total=%d bytes (%.1f KB), free=%d bytes (%.1f KB)\n", usedBytes, usedBytes / 1024.0f, MAX_MEMORY_BYTES, MAX_MEMORY_BYTES / 1024.0f, freeBytes, freeBytes / 1024.0f);
-    }
-
-    // ===[ Load CONFIG.JSN ]===
-    drawStatusScreen(gsGlobal, gsFontM, dataWin->gen8.displayName, "Loading CONFIG.JSN...", &loadingState);
-
-    char* configJsonPath = PS2Utils_createDevicePath("CONFIG.JSN");
-    FILE* configFile = fopen(configJsonPath, "rb");
-    JsonValue* configRoot = nullptr;
-
-    if (configFile != nullptr) {
-        fseek(configFile, 0, SEEK_END);
-        long configSize = ftell(configFile);
-        fseek(configFile, 0, SEEK_SET);
-
-        char* configJsonText = safeMalloc((size_t) configSize + 1);
-        size_t configBytesRead = fread(configJsonText, 1, (size_t) configSize, configFile);
-        configJsonText[configBytesRead] = '\0';
-        fclose(configFile);
-
-        configRoot = JsonReader_parse(configJsonText);
-        free(configJsonText);
-    }
-    free(configJsonPath);
-
-    if (configRoot == nullptr) {
-        drawStatusScreen(gsGlobal, gsFontM, dataWin->gen8.displayName, "CONFIG.JSN invalid or not found!", &loadingState);
-        while (true) {}
     }
 
     FileSystem* fileSystem = Ps2FileSystem_create(configRoot, dataWin->gen8.displayName);
