@@ -5588,6 +5588,24 @@ static RValue builtinNewGMLArray(VMContext* ctx, RValue* args, int32_t argCount)
     return arr;
 }
 
+// @@This@@ - GMS2 internal function returning the current instance's ID.
+// Emitted by the GMS2 compiler for expressions like `self` when used as a value.
+static RValue builtinThis(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* inst = (Instance*) ctx->currentInstance;
+    if (inst == nullptr) return RValue_makeInt32(INSTANCE_SELF);
+    return RValue_makeInt32((int32_t) inst->instanceId);
+}
+
+// @@Other@@ - GMS2 internal function returning the "other" instance's ID.
+// Falls back to the current instance when there is no other (matches GML semantics outside with/collision).
+static RValue builtinOther(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Instance* other = (Instance*) ctx->otherInstance;
+    if (other != nullptr) return RValue_makeInt32((int32_t) other->instanceId);
+    Instance* inst = (Instance*) ctx->currentInstance;
+    if (inst == nullptr) return RValue_makeInt32(INSTANCE_SELF);
+    return RValue_makeInt32((int32_t) inst->instanceId);
+}
+
 // ===[ PATH FUNCTIONS ]===
 
 // path_start(path, speed, endaction, absolute) - HTML5: Assign_Path (yyInstance.js:2695-2743)
@@ -6336,6 +6354,8 @@ void VMBuiltins_registerAll(VMContext* ctx) {
 
     // GMS2 internal
     VM_registerBuiltin(ctx, "@@NewGMLArray@@", builtinNewGMLArray);
+    VM_registerBuiltin(ctx, "@@This@@", builtinThis);
+    VM_registerBuiltin(ctx, "@@Other@@", builtinOther);
 
     // Path
     VM_registerBuiltin(ctx, "path_start", builtinPathStart);
