@@ -3459,6 +3459,10 @@ void VM_free(VMContext* ctx) {
     // Free hash maps
     shfree(ctx->funcMap);
     shfree(ctx->globalVarNameMap);
+    repeat(shlen(ctx->codeLocalsMap), i) {
+        free(ctx->codeLocalsMap[i].key);
+    }
+    shfree(ctx->codeLocalsMap);
 
     // Free dedup key strings before freeing the hashmaps
     repeat(shlen(ctx->loggedUnknownFuncs), i) {
