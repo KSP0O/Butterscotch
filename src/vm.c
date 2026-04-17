@@ -597,7 +597,7 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
                 }
                 free(rvalueAsString);
             }
-        } else if (targetInstance != nullptr) {
+        } else if (targetInstance != nullptr && targetInstance->objectIndex >= 0 && ctx->dataWin->objt.count > (uint32_t) targetInstance->objectIndex) {
             const char* objName = ctx->dataWin->objt.objects[targetInstance->objectIndex].name;
             if (shouldTraceVariable(ctx->varReadsToBeTraced, objName, "self", varDef->name)) {
                 char* rvalueAsString = RValue_toStringTyped(result);
@@ -821,7 +821,7 @@ static void resolveVariableWrite(VMContext* ctx, int32_t instanceType, uint32_t 
                 }
                 free(rvalueAsString);
             }
-        } else if (targetInstance != nullptr) {
+        } else if (targetInstance != nullptr && targetInstance->objectIndex >= 0 && ctx->dataWin->objt.count > (uint32_t) targetInstance->objectIndex) {
             const char* objName = ctx->dataWin->objt.objects[targetInstance->objectIndex].name;
             if (shouldTraceVariable(ctx->varWritesToBeTraced, objName, "self", varDef->name)) {
                 char* rvalueAsString = RValue_toStringTyped(val);
