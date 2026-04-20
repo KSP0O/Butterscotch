@@ -1111,10 +1111,13 @@ static void gsDrawSpritePart(Renderer* renderer, int32_t tpagIndex, int32_t srcO
     }
 
     AtlasTPAGEntry* atlasEntry = &gs->atlasTPAGEntries[tpagIndex];
+    TexturePageItem* tpag = &renderer->dataWin->tpag.items[tpagIndex];
 
-    // Intersect the requested source rect with the crop region
-    float cX = (float) atlasEntry->cropX;
-    float cY = (float) atlasEntry->cropY;
+    // srcOffX/srcOffY are in source-page space (Renderer_drawSpritePartExt subtracts tpag->targetX/Y to convert from GML sprite-bounding space).
+    // The preprocessor's cropX/cropY, however, are in sprite-bounding space (extractFromTPAG builds a boundingWidth x boundingHeight image with pixels offset by targetX/targetY, then cropTransparentBorders runs on that).
+    // Subtract targetX/targetY here so both sides of the intersection live in the same coordinate system.
+    float cX = (float) atlasEntry->cropX - (float) tpag->targetX;
+    float cY = (float) atlasEntry->cropY - (float) tpag->targetY;
     float cW = (float) atlasEntry->cropW;
     float cH = (float) atlasEntry->cropH;
 
