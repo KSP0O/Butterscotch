@@ -597,7 +597,23 @@ static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t
     // BC17+: instanceType == INSTANCE_BUILTIN (-6) on a Push.v means "look up this name as a function reference" (emitted for CallV dispatch paths like `@@This@@(); texture_set_interpolation_ext; CallV`).
     // Intercept before the builtin-variable path: only treat it as a function if the VARI entry isn't a real built-in variable (varID == -6 with a resolved builtinVarId).
     if (IS_BC17_OR_HIGHER(ctx) && instanceType == INSTANCE_BUILTIN && !(varDef->varID == -6 && varDef->builtinVarId != -1)) {
-        // Try user scripts/code entries first (funcMap maps both "funcName" and "gml_Script_funcName")
+        // `@@This@@(); push.v bltn.<name>; CallV` is also used for `self.method()` where `method` is a user-defined method stored on the instance (e.g. `init = method(...)` on an object).
+        // CallV pops [func, instance, args], so the instance is sitting right below the func we're about to push. Peek at it and try to read `<name>` off its selfVars first; if the VARI entry has a self scope and the peeked slot resolves to an instance with the field, return that method. Otherwise fall through to global function lookup.
+        if (varDef->instanceType == INSTANCE_SELF && ctx->stack.top > 0) {
+            RValue* peek = stackPeek(ctx);
+            int32_t peekId = RValue_toInt32(*peek);
+            Instance* peekInst = findInstanceByTarget(ctx, peekId);
+            if (peekInst != nullptr) {
+                ptrdiff_t svIdx = hmgeti(peekInst->selfVars, varDef->varID);
+                if (svIdx >= 0) {
+                    RValue val = peekInst->selfVars[svIdx].value;
+                    val.ownsString = false;
+                    return val;
+                }
+            }
+        }
+
+        // Then try user scripts/code entries (funcMap maps both "funcName" and "gml_Script_funcName")
         ptrdiff_t mapIdx = shgeti(ctx->funcMap, varDef->name);
         if (mapIdx >= 0) {
             int32_t codeIndex = ctx->funcMap[mapIdx].value;
