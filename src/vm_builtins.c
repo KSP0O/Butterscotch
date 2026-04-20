@@ -6385,6 +6385,8 @@ void VMBuiltins_registerAll(VMContext* ctx) {
 
     // Array
     VM_registerBuiltin(ctx, "array_length_1d", builtinArrayLength1d);
+    // GM:S 2 alias for array_length_1d
+    VM_registerBuiltin(ctx, "array_length", builtinArrayLength1d);
 
     // Steam stubs
     VM_registerBuiltin(ctx, "steam_initialised", builtin_steam_initialised);
