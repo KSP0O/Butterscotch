@@ -127,7 +127,6 @@ typedef struct CallFrame {
     uint32_t savedLocalsCount;
     const char* savedCodeName;
     int32_t savedSavearefBalance;
-    CodeLocals* savedCodeLocals;
     LocalSlotEntry* savedCodeLocalsSlotMap;
     RValue* savedScriptArgs;
     int32_t savedScriptArgCount;
@@ -180,9 +179,8 @@ typedef struct VMContext {
     struct Instance* otherInstance; // "other" instance for collision events
     DataWin* dataWin;
     struct Runner* runner;
-    CodeLocals* currentCodeLocals;
     // BC17+: varID -> localVars slot lookup for the current code.
-    // Points into codeLocalsSlotMaps, parallel to currentCodeLocals. Stays in sync with it.
+    // See codeLocalsSlotMaps
     LocalSlotEntry* currentCodeLocalsSlotMap;
     FuncCallCache* funcCallCache;
     const char* currentCodeName;
@@ -221,9 +219,7 @@ typedef struct VMContext {
     struct { char* key; int32_t value; }* funcMap;
     // codeName -> CodeLocals* hash map (stb_ds)
     struct { char* key; CodeLocals* value; }* codeLocalsMap;
-    // BC17+: parallel to dataWin->func.codeLocals[]. Each element is a hmap keyed by the local's CodeLocals.locals[i].index (== its shared varID), mapping to the slot position i
-    // within that code's localVars array. Built once in VM_create and read O(1) at dispatch time.
-    // In BC17, a single GML local can surface as several VARI chunk entries that share varID, so we key by varID (not VARI chunk index) to unify them to a single slot.
+    // BC17+: A map of CODE indexes -> localVars slot lookup map
     LocalSlotEntry** codeLocalsSlotMaps;
     // varName -> varID hash map for global variables (stb_ds)
     struct { char* key; int32_t value; }* globalVarNameMap;

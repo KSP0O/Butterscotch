@@ -474,21 +474,27 @@ static Variable* resolveVarDef(VMContext* ctx, uint32_t varRef) {
 // We key by that shared varID via the precomputed currentCodeLocalsSlotMap so reads/writes via any VARI
 // entry agree on the same localVars slot.
 static uint32_t resolveLocalSlot(VMContext* ctx, int32_t varID) {
-    if (IS_BC16_OR_BELOW(ctx) || ctx->currentCodeLocalsSlotMap == nullptr) {
+    if (IS_BC16_OR_BELOW(ctx)) {
         return (uint32_t) varID;
     }
-    // The GMS 2.3+ compiler sometimes omits array-only locals (e.g. `var __slots; __slots[i] = ...`) from CodeLocals entirely!
-    // The bytecode still pushes INSTANCE_LOCAL (-7) at runtime and references the variable by its VARI varID.
-    // When we see a varID that was not pre-registered, allocate a fresh slot on the fly and cache it in the slot map so subsequent accesses (and subsequent calls) reuse it.
+
+    // For BC17, we'll allocate the slot dynamically because the data.win CANNOT be trusted to know how localVars the script has
     uint32_t slot;
     ptrdiff_t idx = hmgeti(ctx->currentCodeLocalsSlotMap, varID);
     if (idx >= 0) {
+        // Already allocated :3
         slot = ctx->currentCodeLocalsSlotMap[idx].value;
     } else {
+        // Not allocated :(
         slot = (uint32_t) hmlen(ctx->currentCodeLocalsSlotMap);
+        // Even though we are dynamically allocating the slots, we are still bound to whatever localVars is allocated to
+        // So, if a script goes over the MAX_CODE_LOCALS, it would cause unforeseen consequences...
         requireMessage(MAX_CODE_LOCALS > slot, "resolveLocalSlot: exceeded MAX_CODE_LOCALS while allocating a slot for an array-only local");
         hmput(ctx->currentCodeLocalsSlotMap, varID, slot);
+        // stb_ds's hmput may reallocate and writes the new pointer back to its lvalue argument only, mirror the update into codeLocalsSlotMaps[] to actually persist it.
+        ctx->codeLocalsSlotMaps[ctx->currentCodeIndex] = ctx->currentCodeLocalsSlotMap;
     }
+
     // Grow this frame's localVars window to cover `slot` whether the entry is pre-existing or freshly allocated.
     // Pre-existing entries can still be past ctx->localVarCount if a nested call to the same code extended the slot map while the outer frame was suspended (the outer frame's localVarCount is captured at call entry and doesn't follow later growth).
     if (slot >= ctx->localVarCount) {
@@ -2686,17 +2692,11 @@ VMContext* VM_create(DataWin* dataWin) {
     }
 
     // BC17+: build per-CodeLocals varID -> slot hmap so resolveLocalSlot is O(1)
+    // We NEED to do it with the "code.count" because YoYo Games in their infinite wisdom thought "what if... we just didn't include some local variables in the localVars map? heck, sometimes we can just NOT include any CodeLocals!"... fun!
     ctx->codeLocalsSlotMaps = nullptr;
-    if (dataWin->gen8.bytecodeVersion >= 17 && dataWin->func.codeLocalsCount > 0) {
-        ctx->codeLocalsSlotMaps = safeCalloc(dataWin->func.codeLocalsCount, sizeof(*ctx->codeLocalsSlotMaps));
-        repeat(dataWin->func.codeLocalsCount, clIdx) {
-            CodeLocals* cl = &dataWin->func.codeLocals[clIdx];
-            LocalSlotEntry* slotMap = nullptr;
-            repeat(cl->localVarCount, i) {
-                hmput(slotMap, (int32_t) cl->locals[i].varID, (uint32_t) i);
-            }
-            ctx->codeLocalsSlotMaps[clIdx] = slotMap;
-        }
+    if (dataWin->gen8.bytecodeVersion >= 17) {
+        ctx->codeLocalsSlotMaps = safeCalloc(dataWin->code.count, sizeof(*ctx->codeLocalsSlotMaps));
+        // For now we don't need to do anything, the localVars will be registered during runtime because we can't figure out how many locals a CODE has reliably
     }
 
     // Register built-in functions
@@ -2766,7 +2766,6 @@ void VM_reset(VMContext* ctx) {
     ctx->currentCodeName = nullptr;
     ctx->localVars = nullptr;
     ctx->localVarCount = 0;
-    ctx->currentCodeLocals = nullptr;
     ctx->currentCodeLocalsSlotMap = nullptr;
     ctx->actionRelativeFlag = false;
 
@@ -2777,36 +2776,21 @@ static CodeLocals* resolveCodeLocals(VMContext* ctx, const char* codeName) {
     return shget(ctx->codeLocalsMap, (char*) codeName);
 }
 
-// Sets currentCodeLocals and keeps currentCodeLocalsSlotMap in sync. Must be used everywhere currentCodeLocals is written so resolveLocalSlot always sees the matching varID -> slot map.
-static void setCurrentCodeLocals(VMContext* ctx, CodeLocals* codeLocals) {
-    ctx->currentCodeLocals = codeLocals;
-    if (codeLocals != nullptr && ctx->codeLocalsSlotMaps != nullptr) {
-        // codeLocals points into dataWin->func.codeLocals[]; same index selects the slot map.
-        ptrdiff_t codeLocalsIdx = codeLocals - ctx->dataWin->func.codeLocals;
-        ctx->currentCodeLocalsSlotMap = ctx->codeLocalsSlotMaps[codeLocalsIdx];
-    } else {
-        ctx->currentCodeLocalsSlotMap = nullptr;
+// Sets the currentCodeLocalsSlotMap for BC17+ games
+static void setCurrentCodeLocalsSlotMap(VMContext* ctx) {
+    if (IS_BC17_OR_HIGHER(ctx)) {
+        ctx->currentCodeLocalsSlotMap = ctx->codeLocalsSlotMaps[ctx->currentCodeIndex];
     }
 }
 
-static uint32_t computeLocalsCount(VMContext* ctx) {
-    // CodeLocals is the authoritative source for local variable count (not code->localsCount).
-    // Array-valued locals now live inline in localVars[] as RVALUE_ARRAY entries, no side map.
-    // The slot map may have grown beyond CodeLocals->localVarCount due to prior runs that encountered array-only locals missing from CodeLocals, so take the larger of the two.
-    //
-    // For some reason in GameMaker: Studio 2.3+ some code doesn't have code locals, why?
-    // If they don't have code locals, then we'll just use 0 anyway...
-    uint32_t localsCount = 0;
-    if (ctx->currentCodeLocals != nullptr) {
-        localsCount = ctx->currentCodeLocals->localVarCount;
-        if (ctx->currentCodeLocalsSlotMap != nullptr) {
-            uint32_t mapSize = (uint32_t) hmlen(ctx->currentCodeLocalsSlotMap);
-            if (mapSize > localsCount) localsCount = mapSize;
-        }
+static uint32_t computeLocalsCount(VMContext* ctx, CodeEntry* code) {
+    if (IS_BC16_OR_BELOW(ctx)) {
+        return code->localsCount;
+    } else {
+        // We can't trust localVarCount in GM:S 2.3+, so we will get our cached map
+        // It is NOT the "right" localsCount because it may increase during runtime, but for now, this shall do
+        return hmlen(ctx->codeLocalsSlotMaps[ctx->currentCodeIndex]);
     }
-    if (localsCount == 0) localsCount = 1;
-    requireMessageFormatted(MAX_CODE_LOCALS >= localsCount, "Code %s has too many locals!", ctx->currentCodeName);
-    return localsCount;
 }
 
 RValue VM_executeCode(VMContext* ctx, int32_t codeIndex) {
@@ -2819,10 +2803,9 @@ RValue VM_executeCode(VMContext* ctx, int32_t codeIndex) {
     ctx->currentCodeName = code->name;
     ctx->currentCodeIndex = codeIndex;
 
-    // Resolve CodeLocals for local variable slot mapping
-    setCurrentCodeLocals(ctx, resolveCodeLocals(ctx, code->name));
+    setCurrentCodeLocalsSlotMap(ctx);
 
-    uint32_t localsCount = computeLocalsCount(ctx);
+    uint32_t localsCount = computeLocalsCount(ctx, code);
     RValue localVars[MAX_CODE_LOCALS];
     ctx->localVars = localVars;
     ctx->localVarCount = localsCount;
@@ -2867,7 +2850,6 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
         .savedLocalsCount = ctx->localVarCount,
         .savedCodeName = ctx->currentCodeName,
         .savedSavearefBalance = ctx->savearefBalance,
-        .savedCodeLocals = ctx->currentCodeLocals,
         .savedCodeLocalsSlotMap = ctx->currentCodeLocalsSlotMap,
         .savedScriptArgs = ctx->scriptArgs,
         .savedScriptArgCount = ctx->scriptArgCount,
@@ -2883,9 +2865,10 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
     ctx->codeEnd = code->length;
     ctx->currentCodeName = code->name;
     ctx->currentCodeIndex = codeIndex;
-    setCurrentCodeLocals(ctx, resolveCodeLocals(ctx, code->name));
 
-    uint32_t localsCount = computeLocalsCount(ctx);
+    setCurrentCodeLocalsSlotMap(ctx);
+
+    uint32_t localsCount = computeLocalsCount(ctx, code);
     // We use fixed-size arrays instead of VLAs because it seems that using multiple VLAs in a single function things get corrupted somehow?
     // So when you see this MAX_CODE_LOCALS and GML_MAX_ARGUMENTS, you can shake your fist in the air and say "damn you MIPS!!1"
     RValue localVars[MAX_CODE_LOCALS];
@@ -2960,7 +2943,6 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
 
     ctx->localVars = saved->savedLocals;
     ctx->localVarCount = saved->savedLocalsCount;
-    ctx->currentCodeLocals = saved->savedCodeLocals;
     ctx->currentCodeLocalsSlotMap = saved->savedCodeLocalsSlotMap;
     ctx->scriptArgs = saved->savedScriptArgs;
     ctx->scriptArgCount = saved->savedScriptArgCount;
