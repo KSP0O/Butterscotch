@@ -2748,6 +2748,7 @@ RValue VM_executeCode(VMContext* ctx, int32_t codeIndex) {
         if (mapSize > localsCount) localsCount = mapSize;
     }
     if (localsCount == 0) localsCount = 1;
+    requireMessage(MAX_CODE_LOCALS >= localsCount, "Code has too many locals!");
     RValue localVars[MAX_CODE_LOCALS];
     ctx->localVars = localVars;
     ctx->localVarCount = localsCount;
@@ -2819,6 +2820,7 @@ RValue VM_callCodeIndex(VMContext* ctx, int32_t codeIndex, RValue* args, int32_t
         if (mapSize > localsCount) localsCount = mapSize;
     }
     if (localsCount == 0) localsCount = 1;
+    requireMessage(MAX_CODE_LOCALS >= localsCount, "Code has too many locals!");
     RValue localVars[MAX_CODE_LOCALS];
     ctx->localVars = localVars;
     ctx->localVarCount = localsCount;
