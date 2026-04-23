@@ -253,16 +253,16 @@ typedef struct {
 } PathPoint;
 
 typedef struct {
-    double x;
-    double y;
-    double speed;
-    double l; // cumulative arc length from start
+    float x;
+    float y;
+    float speed;
+    float l; // cumulative arc length from start
 } InternalPathPoint;
 
 typedef struct {
-    double x;
-    double y;
-    double speed;
+    float x;
+    float y;
+    float speed;
 } PathPositionResult;
 
 typedef struct {
@@ -274,7 +274,7 @@ typedef struct {
     PathPoint* points;
     uint32_t internalPointCount;
     InternalPathPoint* internalPoints;
-    double length; // total arc length
+    float length; // total arc length
 } GamePath;
 
 typedef struct {
@@ -846,4 +846,4 @@ bool DataWin_isVersionAtLeast(const DataWin* dw, uint32_t major, uint32_t minor,
 // Raises the detected effective version to at least (major, minor, release, build). No-op if the detected version is already >= the target.
 void DataWin_bumpVersionTo(DataWin* dw, uint32_t major, uint32_t minor, uint32_t release, uint32_t build);
 void GamePath_computeInternal(GamePath* path);
-PathPositionResult GamePath_getPosition(GamePath* path, double t);
+PathPositionResult GamePath_getPosition(GamePath* path, float t);

@@ -1578,7 +1578,7 @@ static bool adaptPath(Runner* runner, Instance* inst) {
     inst->pathPosition = (float) (inst->pathPosition + inst->pathSpeed * sp / path->length);
 
     // Handle end actions if position out of [0,1]
-    PathPositionResult pos0 = GamePath_getPosition(path, 0.0);
+    PathPositionResult pos0 = GamePath_getPosition(path, 0.0f);
     if (inst->pathPosition >= 1.0f || 0.0f >= inst->pathPosition) {
         atPathEnd = (inst->pathSpeed == 0.0f) ? false : true;
 
@@ -1607,7 +1607,7 @@ static bool adaptPath(Runner* runner, Instance* inst) {
             }
             // continue from current position
             case 2: {
-                PathPositionResult pos1 = GamePath_getPosition(path, 1.0);
+                PathPositionResult pos1 = GamePath_getPosition(path, 1.0f);
                 GMLReal xx = pos1.x - pos0.x;
                 GMLReal yy = pos1.y - pos0.y;
                 GMLReal xdif = inst->pathScale * (xx * GMLReal_cos(orient) + yy * GMLReal_sin(orient));

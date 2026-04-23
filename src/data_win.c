@@ -68,28 +68,28 @@ static EventAction* readEventActions(BinaryReader* reader, DataWin* dw, uint32_t
 static InternalPathPoint* tempIntPoints = nullptr;
 static uint32_t tempIntPointCount = 0;
 
-static void addInternalPoint(double x, double y, double speed) {
+static void addInternalPoint(float x, float y, float speed) {
     InternalPathPoint pt = { .x = x, .y = y, .speed = speed, .l = 0.0 };
     arrput(tempIntPoints, pt);
     tempIntPointCount++;
 }
 
 // Recursive midpoint subdivision for smooth curves (yyPath.js:225-242)
-static void handlePiece(int depth, double x1, double y1, double s1, double x2, double y2, double s2, double x3, double y3, double s3) {
+static void handlePiece(int depth, float x1, float y1, float s1, float x2, float y2, float s2, float x3, float y3, float s3) {
     if (depth == 0) return;
 
-    double mx = (x1 + x2 + x2 + x3) / 4.0;
-    double my = (y1 + y2 + y2 + y3) / 4.0;
-    double ms = (s1 + s2 + s2 + s3) / 4.0;
+    float mx = (x1 + x2 + x2 + x3) / 4.0f;
+    float my = (y1 + y2 + y2 + y3) / 4.0f;
+    float ms = (s1 + s2 + s2 + s3) / 4.0f;
 
-    if ((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1) > 16.0) {
-        handlePiece(depth - 1, x1, y1, s1, (x2 + x1) / 2.0, (y2 + y1) / 2.0, (s2 + s1) / 2.0, mx, my, ms);
+    if ((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1) > 16.0f) {
+        handlePiece(depth - 1, x1, y1, s1, (x2 + x1) / 2.0f, (y2 + y1) / 2.0f, (s2 + s1) / 2.0f, mx, my, ms);
     }
 
     addInternalPoint(mx, my, ms);
 
-    if ((x2 - x3) * (x2 - x3) + (y2 - y3) * (y2 - y3) > 16.0) {
-        handlePiece(depth - 1, mx, my, ms, (x3 + x2) / 2.0, (y3 + y2) / 2.0, (s3 + s2) / 2.0, x3, y3, s3);
+    if ((x2 - x3) * (x2 - x3) + (y2 - y3) * (y2 - y3) > 16.0f) {
+        handlePiece(depth - 1, mx, my, ms, (x3 + x2) / 2.0f, (y3 + y2) / 2.0f, (s3 + s2) / 2.0f, x3, y3, s3);
     }
 }
 
@@ -124,9 +124,9 @@ void GamePath_computeInternal(GamePath* path) {
             PathPoint* p2 = &path->points[(i + 1) % path->pointCount];
             PathPoint* p3 = &path->points[(i + 2) % path->pointCount];
             handlePiece((int) path->precision,
-                        (p1->x + p2->x) / 2.0, (p1->y + p2->y) / 2.0, (p1->speed + p2->speed) / 2.0,
+                        (p1->x + p2->x) / 2.0f, (p1->y + p2->y) / 2.0f, (p1->speed + p2->speed) / 2.0f,
                         p2->x, p2->y, p2->speed,
-                        (p2->x + p3->x) / 2.0, (p2->y + p3->y) / 2.0, (p2->speed + p3->speed) / 2.0);
+                        (p2->x + p3->x) / 2.0f, (p2->y + p3->y) / 2.0f, (p2->speed + p3->speed) / 2.0f);
         }
 
         if (!path->isClosed) {
@@ -159,28 +159,28 @@ void GamePath_computeInternal(GamePath* path) {
         path->internalPoints[0].l = 0.0;
         repeat(path->internalPointCount - 1, j) {
             uint32_t i = j + 1;
-            double dx = path->internalPoints[i].x - path->internalPoints[i - 1].x;
-            double dy = path->internalPoints[i].y - path->internalPoints[i - 1].y;
-            path->length += sqrt(dx * dx + dy * dy);
+            float dx = path->internalPoints[i].x - path->internalPoints[i - 1].x;
+            float dy = path->internalPoints[i].y - path->internalPoints[i - 1].y;
+            path->length += sqrtf(dx * dx + dy * dy);
             path->internalPoints[i].l = path->length;
         }
     }
 }
 
 // Get interpolated position at t in [0,1] (yyPath.js:362-409)
-PathPositionResult GamePath_getPosition(GamePath* path, double t) {
-    PathPositionResult result = { .x = 0.0, .y = 0.0, .speed = 0.0 };
+PathPositionResult GamePath_getPosition(GamePath* path, float t) {
+    PathPositionResult result = { .x = 0.0f, .y = 0.0f, .speed = 0.0f };
 
     if (path->internalPointCount == 0) return result;
 
-    if (path->internalPointCount == 1 || path->length == 0.0 || 0.0 >= t) {
+    if (path->internalPointCount == 1 || path->length == 0.0f || 0.0f >= t) {
         result.x = path->internalPoints[0].x;
         result.y = path->internalPoints[0].y;
         result.speed = path->internalPoints[0].speed;
         return result;
     }
 
-    if (t >= 1.0) {
+    if (t >= 1.0f) {
         InternalPathPoint* last = &path->internalPoints[path->internalPointCount - 1];
         result.x = last->x;
         result.y = last->y;
@@ -189,17 +189,17 @@ PathPositionResult GamePath_getPosition(GamePath* path, double t) {
     }
 
     // Get the right interval via linear scan
-    double l = path->length * t;
+    float l = path->length * t;
     uint32_t pos = 0;
     while (path->internalPointCount - 2 > pos && l >= path->internalPoints[pos + 1].l) {
         pos++;
     }
 
     InternalPathPoint* node = &path->internalPoints[pos];
-    double lRem = l - node->l;
-    double w = path->internalPoints[pos + 1].l - node->l;
+    float lRem = l - node->l;
+    float w = path->internalPoints[pos + 1].l - node->l;
 
-    if (w != 0.0) {
+    if (w != 0.0f) {
         InternalPathPoint* next = &path->internalPoints[pos + 1];
         result.x = node->x + lRem * (next->x - node->x) / w;
         result.y = node->y + lRem * (next->y - node->y) / w;

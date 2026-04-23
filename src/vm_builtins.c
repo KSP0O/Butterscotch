@@ -6615,11 +6615,11 @@ static RValue builtinPathStart(VMContext* ctx, RValue* args, int32_t argCount) {
     inst->pathEndAction = endAction;
 
     if (absolute) {
-        PathPositionResult startPos = GamePath_getPosition(path, inst->pathSpeed >= 0.0f ? 0.0 : 1.0);
+        PathPositionResult startPos = GamePath_getPosition(path, inst->pathSpeed >= 0.0f ? 0.0f : 1.0f);
         inst->x = (float) startPos.x;
         inst->y = (float) startPos.y;
 
-        PathPositionResult origin = GamePath_getPosition(path, 0.0);
+        PathPositionResult origin = GamePath_getPosition(path, 0.0f);
         inst->pathXStart = (float) origin.x;
         inst->pathYStart = (float) origin.y;
     } else {
