@@ -1149,9 +1149,13 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
 
     // Run room creation code
     if (room->creationCodeId >= 0 && dataWin->code.count > (uint32_t) room->creationCodeId) {
-        // Room creation code runs in global context (no specific instance)
+        // Room creation code runs in global context, the native runner creates a fake/dummy instance for the "self"
+        Instance* dummy = Instance_create(0, -1, 0, 0);
+        runner->vmContext->currentInstance = dummy;
         RValue result = VM_executeCode(runner->vmContext, room->creationCodeId);
         RValue_free(&result);
+        runner->vmContext->currentInstance = nullptr;
+        Instance_free(dummy);
     }
 
     // Mark this room as initialized for persistent room support
