@@ -792,26 +792,46 @@ void VMBuiltins_setVariable(VMContext* ctx, int16_t builtinVarId, const char* na
             if (inst == nullptr) break;
             inst->imageSpeed = (float) RValue_toReal(val);
             return;
-        case BUILTIN_VAR_IMAGE_INDEX:
+        case BUILTIN_VAR_IMAGE_INDEX: {
             if (inst == nullptr) break;
-            inst->imageIndex = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->imageIndex;
+            if (changed) {
+                inst->imageIndex = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
-        case BUILTIN_VAR_IMAGE_XSCALE:
+        }
+        case BUILTIN_VAR_IMAGE_XSCALE: {
             if (inst == nullptr) break;
-            inst->imageXscale = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->imageXscale;
+            if (changed) {
+                inst->imageXscale = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
-        case BUILTIN_VAR_IMAGE_YSCALE:
+        }
+        case BUILTIN_VAR_IMAGE_YSCALE: {
             if (inst == nullptr) break;
-            inst->imageYscale = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->imageYscale;
+            if (changed) {
+                inst->imageYscale = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
-        case BUILTIN_VAR_IMAGE_ANGLE:
+        }
+        case BUILTIN_VAR_IMAGE_ANGLE: {
             if (inst == nullptr) break;
-            inst->imageAngle = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->imageAngle;
+            if (changed) {
+                inst->imageAngle = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
+        }
         case BUILTIN_VAR_IMAGE_ALPHA:
             if (inst == nullptr) break;
             inst->imageAlpha = (float) RValue_toReal(val);
@@ -820,11 +840,16 @@ void VMBuiltins_setVariable(VMContext* ctx, int16_t builtinVarId, const char* na
             if (inst == nullptr) break;
             inst->imageBlend = (uint32_t) RValue_toReal(val);
             return;
-        case BUILTIN_VAR_SPRITE_INDEX:
+        case BUILTIN_VAR_SPRITE_INDEX: {
             if (inst == nullptr) break;
-            inst->spriteIndex = RValue_toInt32(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            int32_t value = RValue_toInt32(val);
+            bool changed = value != inst->spriteIndex;
+            if (changed) {
+                inst->spriteIndex = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
+        }
         case BUILTIN_VAR_VISIBLE:
             if (inst == nullptr) break;
             inst->visible = RValue_toBool(val);
@@ -833,16 +858,26 @@ void VMBuiltins_setVariable(VMContext* ctx, int16_t builtinVarId, const char* na
             if (inst == nullptr) break;
             inst->depth = RValue_toInt32(val);
             return;
-        case BUILTIN_VAR_X:
+        case BUILTIN_VAR_X: {
             if (inst == nullptr) break;
-            inst->x = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->x;
+            if (changed) {
+                inst->x = (float) RValue_toReal(val);
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
-        case BUILTIN_VAR_Y:
+        }
+        case BUILTIN_VAR_Y: {
             if (inst == nullptr) break;
-            inst->y = (float) RValue_toReal(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            float value = (float) RValue_toReal(val);
+            bool changed = value != inst->y;
+            if (changed) {
+                inst->y = (float) RValue_toReal(val);
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
+        }
         case BUILTIN_VAR_PERSISTENT:
             if (inst == nullptr) break;
             inst->persistent = RValue_toBool(val);
@@ -867,11 +902,16 @@ void VMBuiltins_setVariable(VMContext* ctx, int16_t builtinVarId, const char* na
             if (inst == nullptr) break;
             inst->ystart = (float) RValue_toReal(val);
             return;
-        case BUILTIN_VAR_MASK_INDEX:
+        case BUILTIN_VAR_MASK_INDEX: {
             if (inst == nullptr) break;
-            inst->maskIndex = RValue_toInt32(val);
-            SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            int32_t value = RValue_toInt32(val);
+            bool changed = value != inst->maskIndex;
+            if (changed) {
+                inst->maskIndex = value;
+                SpatialGrid_markInstanceAsDirty(runner->spatialGrid, inst);
+            }
             return;
+        }
         case BUILTIN_VAR_SPEED:
             if (inst == nullptr) break;
             inst->speed = (float) RValue_toReal(val);
