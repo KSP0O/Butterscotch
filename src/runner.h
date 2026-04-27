@@ -188,6 +188,20 @@ typedef struct {
     TileLayerState value;
 } TileLayerMapEntry;
 
+// A single entry in the depth-sorted draw list. Cached on Runner and rebuilt lazily based on Runner.drawableListStructureDirty / drawableListSortDirty.
+// Filtering on instance->active/visible and runtimeLayer->visible happens at draw time so toggling those does not require invalidating the cache.
+typedef enum { DRAWABLE_TILE, DRAWABLE_INSTANCE, DRAWABLE_LAYER } DrawableType;
+
+typedef struct {
+    DrawableType type;
+    int32_t depth;
+    union {
+        Instance* instance;
+        int32_t tileIndex;
+        RuntimeLayer* runtimeLayer;
+    };
+} Drawable;
+
 // stb_ds hashmap entry for ds_map: string key -> RValue
 typedef struct {
     char* key;
@@ -329,6 +343,15 @@ typedef struct Runner {
     struct { char* key; int value; }* disabledObjects; // stb_ds string hashmap, nullptr = no filtering
     struct { int key; Instance* value; }* instancesToId;
     bool forceDrawDepth;
+    // Depth-sorted unified list of all drawables (instances + tiles + runtime layers) for the current room.
+    // Active/visible filtering happens at draw time, so toggling those flags does not invalidate the cache.
+    //
+    // Two-tier invalidation:
+    //   structureDirty - the SET of entries changed (instance/layer create or destroy, room change). Full rebuild.
+    //   sortDirty      - the entries are the same but .depth values may have shifted. Refresh depths and only re-sort if order broke. Cheap when small depth shifts don't cross neighbors (typical depth=-y games).
+    Drawable* cachedDrawables; // stb_ds array
+    bool drawableListStructureDirty;
+    bool drawableListSortDirty;
     // Dummy instance to serve as "self" during GLOB script execution
     // In bytecode version 17+, global init scripts store method values on "self" via Pop.v.v
     // The real runner uses a persistent YYObjectBase for this, the YYObjectBase is a "parent" of Instance

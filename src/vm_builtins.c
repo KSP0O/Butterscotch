@@ -923,10 +923,15 @@ void VMBuiltins_setVariable(VMContext* ctx, int16_t builtinVarId, const char* na
             if (inst == nullptr) break;
             inst->visible = RValue_toBool(val);
             return;
-        case BUILTIN_VAR_DEPTH:
+        case BUILTIN_VAR_DEPTH: {
             if (inst == nullptr) break;
-            inst->depth = RValue_toInt32(val);
+            int32_t newDepth = RValue_toInt32(val);
+            if (newDepth != inst->depth) {
+                inst->depth = newDepth;
+                ((Runner*) ctx->runner)->drawableListSortDirty = true;
+            }
             return;
+        }
         case BUILTIN_VAR_X: {
             if (inst == nullptr) break;
             float value = (float) RValue_toReal(val);
@@ -4219,6 +4224,8 @@ static RValue builtinInstanceChange(VMContext* ctx, RValue* args, int32_t argCou
     inst->depth = newObjDef->depth;
     inst->maskIndex = newObjDef->textureMaskId;
     inst->imageIndex = 0.0;
+    // The instance pointer is unchanged so this is just a depth shift, not a structural change.
+    runner->drawableListSortDirty = true;
 
     // Fire create event on new object if requested
     if (performEvents) {
@@ -6506,8 +6513,10 @@ static RValue builtinLayerDepth(VMContext* ctx, RValue* args, MAYBE_UNUSED int32
     int32_t depth = RValue_toInt32(args[1]);
 
     RuntimeLayer* runtimeLayer = Runner_findRuntimeLayerById(runner, id);
-    if (runtimeLayer != nullptr)
+    if (runtimeLayer != nullptr && runtimeLayer->depth != depth) {
         runtimeLayer->depth = depth;
+        runner->drawableListSortDirty = true;
+    }
 
     return RValue_makeUndefined();
 }
@@ -6635,6 +6644,7 @@ static RValue builtinLayerCreate(VMContext* ctx, RValue* args, int32_t argCount)
         .elements = nullptr,
     };
     arrput(runner->runtimeLayers, runtimeLayer);
+    runner->drawableListStructureDirty = true;
     return RValue_makeReal((GMLReal) id);
 }
 
@@ -6652,6 +6662,7 @@ static RValue builtinLayerDestroy(VMContext* ctx, RValue* args, MAYBE_UNUSED int
 
         Runner_freeRuntimeLayer(&runner->runtimeLayers[i]);
         arrdel(runner->runtimeLayers, i);
+        runner->drawableListStructureDirty = true;
         break;
     }
     return RValue_makeUndefined();

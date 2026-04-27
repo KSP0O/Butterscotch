@@ -429,18 +429,6 @@ void Runner_drawBackgrounds(Runner* runner, bool foreground) {
 
 // ===[ Draw ]===
 
-typedef enum { DRAWABLE_TILE, DRAWABLE_INSTANCE, DRAWABLE_LAYER } DrawableType;
-
-typedef struct {
-    DrawableType type;
-    int32_t depth;
-    union {
-        Instance* instance;
-        int32_t tileIndex; // index into currentRoom->tiles
-        RuntimeLayer* runtimeLayer;
-    };
-} Drawable;
-
 static int compareDrawableDepth(const void* a, const void* b) {
     const Drawable* da = (const Drawable*) a;
     const Drawable* db = (const Drawable*) b;
@@ -534,24 +522,96 @@ static void Runner_drawTileLayer(Runner* runner, RoomLayerTilesData* data, float
     }
 }
 
+// Returns true if "drawables" is already in compareDrawableDepth order. Used by the sort-dirty path to skip qsort when small depth perturbations didn't actually cross any neighbor.
+static bool isDrawableArraySorted(Drawable* drawables, int32_t count) {
+    for (int32_t i = 1; count > i; i++) {
+        if (compareDrawableDepth(&drawables[i - 1], &drawables[i]) > 0) return false;
+    }
+    return true;
+}
+
+// Refreshes each entry's cached .depth from the live instance/runtime-layer pointer. Tile entries never change depth mid-room so they're left alone.
+static void refreshDrawableDepths(Drawable* drawables, int32_t count) {
+    for (int32_t i = 0; count > i; i++) {
+        Drawable* d = &drawables[i];
+        if (d->type == DRAWABLE_INSTANCE) {
+            d->depth = d->instance->depth;
+        } else if (d->type == DRAWABLE_LAYER) {
+            d->depth = d->runtimeLayer->depth;
+        }
+    }
+}
+
+// Rebuilds runner->cachedDrawables when invalidated. Two-tier strategy:
+//   structureDirty - the SET of entries changed (instance/layer create or destroy, room change). Drop the cache and re-add every instance/tile/runtime-layer, then qsort.
+//   sortDirty only - the entries are the same but .depth values may have shifted. Refresh depths from the live sources and only qsort if the order actually broke.
+static void rebuildDrawableCacheIfDirty(Runner* runner) {
+    if (runner->drawableListStructureDirty) {
+        arrsetlen(runner->cachedDrawables, 0);
+        Room* room = runner->currentRoom;
+        if (room == nullptr) {
+            runner->drawableListStructureDirty = false;
+            runner->drawableListSortDirty = false;
+            return;
+        }
+
+        int32_t instanceCount = (int32_t) arrlen(runner->instances);
+        repeat(instanceCount, i) {
+            Instance* inst = runner->instances[i];
+            Drawable d = { .type = DRAWABLE_INSTANCE, .depth = inst->depth, .instance = inst };
+            arrput(runner->cachedDrawables, d);
+        }
+
+        if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) {
+            repeat(room->tileCount, i) {
+                RoomTile* tile = &room->tiles[i];
+                Drawable d = { .type = DRAWABLE_TILE, .depth = tile->tileDepth, .tileIndex = (int32_t) i };
+                arrput(runner->cachedDrawables, d);
+            }
+        } else {
+            size_t runtimeLayersCount = arrlenu(runner->runtimeLayers);
+            repeat(runtimeLayersCount, i) {
+                RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
+                Drawable d = { .type = DRAWABLE_LAYER, .depth = runtimeLayer->depth, .runtimeLayer = runtimeLayer };
+                arrput(runner->cachedDrawables, d);
+            }
+        }
+
+        int32_t count = (int32_t) arrlen(runner->cachedDrawables);
+        if (count > 1) {
+            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawableDepth);
+        }
+        runner->drawableListStructureDirty = false;
+        runner->drawableListSortDirty = false;
+        return;
+    }
+
+    if (runner->drawableListSortDirty) {
+        int32_t count = (int32_t) arrlen(runner->cachedDrawables);
+        refreshDrawableDepths(runner->cachedDrawables, count);
+        if (count > 1 && !isDrawableArraySorted(runner->cachedDrawables, count)) {
+            qsort(runner->cachedDrawables, count, sizeof(Drawable), compareDrawableDepth);
+        }
+        runner->drawableListSortDirty = false;
+    }
+}
+
 void Runner_draw(Runner* runner) {
     Room* room = runner->currentRoom;
 
-    // Collect active + visible instances for event dispatch
-    Instance** drawList = nullptr;
-    int32_t count = (int32_t) arrlen(runner->instances);
-    repeat(count, i) {
-        Instance* inst = runner->instances[i];
-        if (inst->active && inst->visible) {
-            arrput(drawList, inst);
-        }
-    }
+    rebuildDrawableCacheIfDirty(runner);
+    int32_t drawableCount = (int32_t) arrlen(runner->cachedDrawables);
+    Drawable* drawables = runner->cachedDrawables;
 
-    // Sort by depth descending (higher depth first)
-    int32_t drawCount = (int32_t) arrlen(drawList);
-    if (drawCount > 1) {
-        qsort(drawList, drawCount, sizeof(Instance*), compareInstanceDepth);
+    // Build a depth-sorted instance-only list for fireDrawSubtype by walking the cache and filtering active+visible.
+    Instance** drawList = nullptr;
+    repeat(drawableCount, i) {
+        Drawable* d = &drawables[i];
+        if (d->type != DRAWABLE_INSTANCE) continue;
+        Instance* inst = d->instance;
+        if (inst->active && inst->visible) arrput(drawList, inst);
     }
+    int32_t drawCount = (int32_t) arrlen(drawList);
 
     // Draw non-foreground backgrounds (behind everything)
     if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0))
@@ -561,52 +621,16 @@ void Runner_draw(Runner* runner) {
     fireDrawSubtype(runner, drawList, drawCount, DRAW_PRE);
     fireDrawSubtype(runner, drawList, drawCount, DRAW_BEGIN);
 
-    // DRAW_NORMAL: build a unified drawable list of tiles + instances, sorted by depth
-    Drawable* drawables = nullptr;
-
-    // Add visible instances
-    repeat(drawCount, i) {
-        Drawable d = { .type = DRAWABLE_INSTANCE, .depth = drawList[i]->depth, .instance = drawList[i] };
-        arrput(drawables, d);
-    }
-
-    // Add tiles (skip hidden layers)
-    if (!DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) {
-        repeat(room->tileCount, i) {
-            RoomTile* tile = &room->tiles[i];
-            // Check if this tile's layer is hidden
-            ptrdiff_t layerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
-            if (layerIdx >= 0 && !runner->tileLayerMap[layerIdx].value.visible) continue;
-
-            Drawable d = { .type = DRAWABLE_TILE, .depth = tile->tileDepth, .tileIndex = (int32_t) i };
-            arrput(drawables, d);
-        }
-    }
-
-    if (DataWin_isVersionAtLeast(runner->dataWin, 2, 0, 0, 0)) {
-        size_t runtimeLayersCount = arrlenu(runner->runtimeLayers);
-        repeat(runtimeLayersCount, i) {
-            RuntimeLayer* runtimeLayer = &runner->runtimeLayers[i];
-            if (!runtimeLayer->visible) continue;
-            Drawable d = { .type = DRAWABLE_LAYER, .depth = runtimeLayer->depth, .runtimeLayer = runtimeLayer };
-            arrput(drawables, d);
-        }
-    }
-
-    // Sort all drawables by depth
-    int32_t drawableCount = (int32_t) arrlen(drawables);
-    if (drawableCount > 1) {
-        qsort(drawables, drawableCount, sizeof(Drawable), compareDrawableDepth);
-    }
-
     // Draw interleaved tiles and instances
     repeat(drawableCount, i) {
         Drawable* d = &drawables[i];
         if (d->type == DRAWABLE_TILE) {
             if (runner->renderer != nullptr) {
                 RoomTile* tile = &room->tiles[d->tileIndex];
-                float offsetX = 0.0f, offsetY = 0.0f;
+                // Skip tiles whose layer was hidden via tile_layer_hide(). Filtered here (not in the cache) so toggling layer visibility doesn't invalidate.
                 ptrdiff_t layerIdx = hmgeti(runner->tileLayerMap, tile->tileDepth);
+                if (layerIdx >= 0 && !runner->tileLayerMap[layerIdx].value.visible) continue;
+                float offsetX = 0.0f, offsetY = 0.0f;
                 if (layerIdx >= 0) {
                     offsetX = runner->tileLayerMap[layerIdx].value.offsetX;
                     offsetY = runner->tileLayerMap[layerIdx].value.offsetY;
@@ -642,6 +666,8 @@ void Runner_draw(Runner* runner) {
             }
         } else if (d->type == DRAWABLE_INSTANCE) {
             Instance* inst = d->instance;
+            // Filter inactive/invisible instances at draw time so the cache doesn't need invalidation when those flags toggle.
+            if (!inst->active || !inst->visible) continue;
             int32_t codeId = findEventCodeIdAndOwner(runner, inst->objectIndex, EVENT_DRAW, DRAW_NORMAL, nullptr);
             if (codeId >= 0) {
                 Runner_executeEvent(runner, inst, EVENT_DRAW, DRAW_NORMAL);
@@ -779,8 +805,6 @@ void Runner_draw(Runner* runner) {
         }
     }
 
-    arrfree(drawables);
-
     fireDrawSubtype(runner, drawList, drawCount, DRAW_END);
 
     // Draw foreground backgrounds (in front of instances, behind GUI)
@@ -792,19 +816,18 @@ void Runner_draw(Runner* runner) {
 }
 
 void Runner_drawGUI(Runner* runner) {
-    Instance** drawList = nullptr;
-    int32_t count = (int32_t) arrlen(runner->instances);
-    repeat(count, i) {
-        Instance* inst = runner->instances[i];
-        if (inst->active && inst->visible) {
-            arrput(drawList, inst);
-        }
-    }
+    rebuildDrawableCacheIfDirty(runner);
 
-    int32_t drawCount = (int32_t) arrlen(drawList);
-    if (drawCount > 1) {
-        qsort(drawList, drawCount, sizeof(Instance*), compareInstanceDepth);
+    // Reuse the cached depth-sorted drawables: walk it and pick instances that are active+visible.
+    Instance** drawList = nullptr;
+    int32_t cachedCount = (int32_t) arrlen(runner->cachedDrawables);
+    repeat(cachedCount, i) {
+        Drawable* d = &runner->cachedDrawables[i];
+        if (d->type != DRAWABLE_INSTANCE) continue;
+        Instance* inst = d->instance;
+        if (inst->active && inst->visible) arrput(drawList, inst);
     }
+    int32_t drawCount = (int32_t) arrlen(drawList);
 
     fireDrawSubtype(runner, drawList, drawCount, DRAW_GUI_BEGIN);
     fireDrawSubtype(runner, drawList, drawCount, DRAW_GUI);
@@ -840,6 +863,7 @@ static Instance* createAndInitInstance(Runner* runner, int32_t instanceId, int32
     hmput(runner->instancesToId, instanceId, inst);
     arrput(runner->instances, inst);
     Runner_addInstanceToObjectLists(runner, inst);
+    runner->drawableListStructureDirty = true;
 
 #ifdef ENABLE_VM_TRACING
     if (shgeti(runner->vmContext->instanceLifecyclesToBeTraced, "*") != -1 || shgeti(runner->vmContext->instanceLifecyclesToBeTraced, objDef->name) != -1) {
@@ -933,6 +957,8 @@ static void initRoom(Runner* runner, int32_t roomIndex) {
 
     runner->currentRoom = room;
     runner->currentRoomIndex = roomIndex;
+    // Tile set, runtime layers, and instance list all change when entering a room.
+    runner->drawableListStructureDirty = true;
     // It could be the first time we are initializing the grid
     if (runner->spatialGrid != nullptr)
         SpatialGrid_free(runner->spatialGrid);
@@ -1292,6 +1318,10 @@ void Runner_reset(Runner* runner) {
     runner->mpPotAhead = 3.0;
     runner->mpPotOnSpot = true;
     runner->lastMusicInstance = -1;
+
+    arrsetlen(runner->cachedDrawables, 0);
+    runner->drawableListStructureDirty = true;
+    runner->drawableListSortDirty = false;
 }
 
 // Populates objectsWithAnyEventOfType[eventType] from the resolved event table: for each event type, the deduplicated list of concrete object indices that respond to ANY subtype of that event. Walks the inverted bySlot index per slot and dedups via a scratch byte set.
@@ -1463,6 +1493,8 @@ void Runner_cleanupDestroyedInstances(Runner* runner) {
             Runner_removeInstanceFromObjectLists(runner, inst);
             hmdel(runner->instancesToId, inst->instanceId);
             Instance_free(inst);
+            // Cached drawables hold raw Instance* that we just freed; force a rebuild before the next draw.
+            runner->drawableListStructureDirty = true;
         }
     }
     arrsetlen(runner->instances, writeIdx);
@@ -2531,6 +2563,8 @@ void Runner_free(Runner* runner) {
         free(runner->objectsWithAnyEventOfType);
         runner->objectsWithAnyEventOfType = nullptr;
     }
+    arrfree(runner->cachedDrawables);
+    runner->cachedDrawables = nullptr;
     arrfree(runner->instanceSnapshots);
     runner->instanceSnapshots = nullptr;
     arrfree(runner->eventDispatchInstances);
