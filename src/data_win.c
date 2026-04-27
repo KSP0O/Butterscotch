@@ -524,12 +524,13 @@ static void parseSPRT(BinaryReader* reader, DataWin* dw, bool skipLoadingPrecise
         // 'check' is the texture count (start of SimpleList)
         spr->textureCount = (uint32_t)check;
         if (spr->textureCount > 0) {
-            spr->textureOffsets = safeMalloc(spr->textureCount * sizeof(uint32_t));
+            // Temporarily store the absolute file offsets here; parseTPAG resolves them in-place to TPAG indices once the TPAG table is known.
+            spr->tpagIndices = safeMalloc(spr->textureCount * sizeof(int32_t));
             repeat(spr->textureCount, j) {
-                spr->textureOffsets[j] = BinaryReader_readUint32(reader);
+                spr->tpagIndices[j] = (int32_t) BinaryReader_readUint32(reader);
             }
         } else {
-            spr->textureOffsets = nullptr;
+            spr->tpagIndices = nullptr;
         }
 
         // Collision mask data
@@ -566,11 +567,6 @@ static void parseSPRT(BinaryReader* reader, DataWin* dw, bool skipLoadingPrecise
         }
     }
     
-    // Build sprtOffsetMap: absolute file offset -> SPRT index
-    // TODO: This is only needed for GMS2
-    repeat(count, i) {
-        hmput(dw->sprtOffsetMap, ptrs[i], (int32_t) i);
-    }
     free(ptrs);
 }
 
@@ -591,7 +587,8 @@ static void parseBGND(BinaryReader* reader, DataWin* dw) {
         bg->transparent = BinaryReader_readBool32(reader);
         bg->smooth = BinaryReader_readBool32(reader);
         bg->preload = BinaryReader_readBool32(reader);
-        bg->textureOffset = BinaryReader_readUint32(reader);
+        // Temporarily store the absolute file offset; parseTPAG resolves it in-place to a TPAG index once the TPAG table is known.
+        bg->tpagIndex = (int32_t) BinaryReader_readUint32(reader);
         if (DataWin_isVersionAtLeast(dw, 2, 0, 0, 0)) {
             bg->gms2UnknownAlways2 = BinaryReader_readUint32(reader);
             bg->gms2TileWidth = BinaryReader_readUint32(reader);
@@ -790,7 +787,8 @@ static void parseFONT(BinaryReader* reader, DataWin* dw) {
         font->charset = BinaryReader_readUint8(reader);
         font->antiAliasing = BinaryReader_readUint8(reader);
         font->rangeEnd = BinaryReader_readUint32(reader);
-        font->textureOffset = BinaryReader_readUint32(reader);
+        // Temporarily store the absolute file offset; parseTPAG resolves it in-place to a TPAG index once the TPAG table is known.
+        font->tpagIndex = (int32_t) BinaryReader_readUint32(reader);
         font->scaleX = BinaryReader_readFloat32(reader);
         font->scaleY = BinaryReader_readFloat32(reader);
         // Optional fields appear in this order when present: AscenderOffset (BC17+),
@@ -1504,6 +1502,38 @@ static void parseROOM(BinaryReader* reader, DataWin* dw, bool lazyLoadRooms, Str
     free(ptrs);
 }
 
+// Sprite/Background/Font initially store an absolute file offset to their TexturePageItem (since SPRT/BGND/FONT are parsed before TPAG).
+// resolveAllTPAGReferences translates those offsets to TPAG indices once the table is known. ptrs[] is the TPAG pointer table in monotonically increasing file order, so we can binary search it.
+// Offsets that don't resolve (or are 0) become -1.
+static int32_t findTPAGIndexByOffset(uint32_t* ptrs, uint32_t count, uint32_t offset) {
+    if (offset == 0) return -1;
+    uint32_t lo = 0, hi = count;
+    while (hi > lo) {
+        uint32_t mid = (lo + hi) >> 1;
+        uint32_t v = ptrs[mid];
+        if (v == offset) return (int32_t) mid;
+        if (offset > v) lo = mid + 1; else hi = mid;
+    }
+    return -1;
+}
+
+static void resolveAllTPAGReferences(DataWin* dw, uint32_t* ptrs, uint32_t count) {
+    repeat(dw->sprt.count, i) {
+        Sprite* spr = &dw->sprt.sprites[i];
+        repeat(spr->textureCount, j) {
+            spr->tpagIndices[j] = findTPAGIndexByOffset(ptrs, count, (uint32_t) spr->tpagIndices[j]);
+        }
+    }
+    repeat(dw->bgnd.count, i) {
+        Background* bg = &dw->bgnd.backgrounds[i];
+        bg->tpagIndex = findTPAGIndexByOffset(ptrs, count, (uint32_t) bg->tpagIndex);
+    }
+    repeat(dw->font.count, i) {
+        Font* fnt = &dw->font.fonts[i];
+        fnt->tpagIndex = findTPAGIndexByOffset(ptrs, count, (uint32_t) fnt->tpagIndex);
+    }
+}
+
 static void parseTPAG(BinaryReader* reader, DataWin* dw) {
     Tpag* t = &dw->tpag;
 
@@ -1530,10 +1560,7 @@ static void parseTPAG(BinaryReader* reader, DataWin* dw) {
         item->texturePageId = BinaryReader_readInt16(reader);
     }
 
-    // Build tpagOffsetMap: absolute file offset -> TPAG index
-    repeat(count, i) {
-        hmput(dw->tpagOffsetMap, ptrs[i], (int32_t) i);
-    }
+    resolveAllTPAGReferences(dw, ptrs, count);
 
     free(ptrs);
 }
@@ -2082,7 +2109,7 @@ void DataWin_free(DataWin* dw) {
     // SPRT
     if (dw->sprt.sprites) {
         repeat(dw->sprt.count, i) {
-            free(dw->sprt.sprites[i].textureOffsets);
+            free(dw->sprt.sprites[i].tpagIndices);
             if (dw->sprt.sprites[i].masks != nullptr) {
                 repeat(dw->sprt.sprites[i].maskCount, j) {
                     free(dw->sprt.sprites[i].masks[j]);
@@ -2093,7 +2120,6 @@ void DataWin_free(DataWin* dw) {
             if (i >= dw->sprt.parsedCount) free((char*) dw->sprt.sprites[i].name);
         }
         free(dw->sprt.sprites);
-        hmfree(dw->sprtOffsetMap);
     }
 
 
@@ -2184,7 +2210,6 @@ void DataWin_free(DataWin* dw) {
 
     // TPAG
     free(dw->tpag.items);
-    hmfree(dw->tpagOffsetMap);
 
     // CODE
     free(dw->code.entries);
@@ -2288,22 +2313,6 @@ void DataWin_loadRoomPayload(DataWin* dw, int32_t roomIndex) {
 
     BinaryReader lazyReader = BinaryReader_create(f, fileSize);
     readRoomPayload(&lazyReader, dw, room);
-}
-
-// ===[ TPAG Offset Resolution ]===
-
-int32_t DataWin_resolveTPAG(DataWin* dw, uint32_t offset) {
-    ptrdiff_t idx = hmgeti(dw->tpagOffsetMap, offset);
-    if (0 > idx) return -1;
-    return dw->tpagOffsetMap[idx].value;
-}
-
-// ===[ SPRT Offset Resolution ]===
-
-int32_t DataWin_resolveSPRT(DataWin* dw, uint32_t offset) {
-    ptrdiff_t idx = hmgeti(dw->sprtOffsetMap, offset);
-    if (0 > idx) return -1;
-    return dw->sprtOffsetMap[idx].value;
 }
 
 // ===[ Dynamic Sprite Slot Allocation ]===

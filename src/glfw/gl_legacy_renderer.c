@@ -511,7 +511,7 @@ static bool glResolveFontState(GLLegacyRenderer* gl, DataWin* dw, Font* font, Gl
     state->spriteFontSprite = nullptr;
 
     if (!font->isSpriteFont) {
-        int32_t fontTpagIndex = DataWin_resolveTPAG(dw, font->textureOffset);
+        int32_t fontTpagIndex = font->tpagIndex;
         if (0 > fontTpagIndex) return false;
 
         state->fontTpag = &dw->tpag.items[fontTpagIndex];
@@ -537,8 +537,7 @@ static bool glResolveGlyph(GLLegacyRenderer* gl, DataWin* dw, GlFontState* state
         int32_t glyphIndex = (int32_t) (glyph - font->glyphs);
         if (0 > glyphIndex ||  glyphIndex >= (int32_t) sprite->textureCount) return false;
 
-        uint32_t tpagOffset = sprite->textureOffsets[glyphIndex];
-        int32_t tpagIdx = DataWin_resolveTPAG(dw, tpagOffset);
+        int32_t tpagIdx = sprite->tpagIndices[glyphIndex];
         if (0 > tpagIdx) return false;
 
         TexturePageItem* glyphTpag = &dw->tpag.items[tpagIdx];
@@ -859,9 +858,6 @@ static void glDrawTextColor(Renderer* renderer, const char* text, float x, float
 
 // ===[ Dynamic Sprite Creation/Deletion ]===
 
-// Sentinel base for fake TPAG offsets used by dynamic sprites
-#define DYNAMIC_TPAG_OFFSET_BASE 0xD0000000u
-
 // Finds a free dynamic texture page slot (glTextures[i] == 0), or appends a new one.
 static uint32_t findOrAllocTexturePageSlot(GLLegacyRenderer* gl) {
     // Scan dynamic range for a reusable slot
@@ -953,10 +949,6 @@ static int32_t glCreateSpriteFromSurface(Renderer* renderer, int32_t x, int32_t 
     tpag->boundingHeight = (uint16_t) h;
     tpag->texturePageId = (int16_t) pageId;
 
-    // Register a fake offset in the tpagOffsetMap so DataWin_resolveTPAG works
-    uint32_t fakeOffset = DYNAMIC_TPAG_OFFSET_BASE + tpagIndex;
-    hmput(dw->tpagOffsetMap, fakeOffset, (int32_t) tpagIndex);
-
     uint32_t spriteIndex = DataWin_allocSpriteSlot(dw, gl->originalSpriteCount);
     Sprite* sprite = &dw->sprt.sprites[spriteIndex];
     // name was set by DataWin_allocSpriteSlot ("__newsprite<N>"); don't overwrite it here
@@ -965,8 +957,8 @@ static int32_t glCreateSpriteFromSurface(Renderer* renderer, int32_t x, int32_t 
     sprite->originX = xorig;
     sprite->originY = yorig;
     sprite->textureCount = 1;
-    sprite->textureOffsets = safeMalloc(sizeof(uint32_t));
-    sprite->textureOffsets[0] = fakeOffset;
+    sprite->tpagIndices = safeMalloc(sizeof(int32_t));
+    sprite->tpagIndices[0] = (int32_t) tpagIndex;
     sprite->maskCount = 0;
     sprite->masks = nullptr;
 
@@ -989,28 +981,24 @@ static void glDeleteSprite(Renderer* renderer, int32_t spriteIndex) {
     Sprite* sprite = &dw->sprt.sprites[spriteIndex];
     if (sprite->textureCount == 0) return; // already deleted
 
-    // Clean up GL texture, TPAG entries, and tpagOffsetMap entries
+    // Clean up GL texture and TPAG entries owned by this sprite.
+    // Slots with index >= originalTpagCount are dynamically allocated and ours to free.
     repeat(sprite->textureCount, i) {
-        uint32_t offset = sprite->textureOffsets[i];
-        if (offset >= DYNAMIC_TPAG_OFFSET_BASE) {
-            int32_t tpagIdx = DataWin_resolveTPAG(dw, offset);
-            if (tpagIdx >= 0) {
-                TexturePageItem* tpag = &dw->tpag.items[tpagIdx];
-                int16_t pageId = tpag->texturePageId;
-                if (pageId >= 0 && gl->textureCount > (uint32_t) pageId) {
-                    glDeleteTextures(1, &gl->glTextures[pageId]);
-                    gl->glTextures[pageId] = 0;
-                }
-                // Mark TPAG slot as free for reuse
-                tpag->texturePageId = -1;
+        int32_t tpagIdx = sprite->tpagIndices[i];
+        if (tpagIdx >= 0 && (uint32_t) tpagIdx >= gl->originalTpagCount) {
+            TexturePageItem* tpag = &dw->tpag.items[tpagIdx];
+            int16_t pageId = tpag->texturePageId;
+            if (pageId >= 0 && gl->textureCount > (uint32_t) pageId) {
+                glDeleteTextures(1, &gl->glTextures[pageId]);
+                gl->glTextures[pageId] = 0;
             }
-            // Remove the fake offset from the lookup map
-            hmdel(dw->tpagOffsetMap, offset);
+            // Mark TPAG slot as free for reuse
+            tpag->texturePageId = -1;
         }
     }
 
     // Clear the sprite entry so it won't be drawn and can be reused. Preserve `name` across the memset: the slot is still in sprt.count and must keep a valid string for asset_get_index / name lookups.
-    free(sprite->textureOffsets);
+    free(sprite->tpagIndices);
     const char* keepName = sprite->name;
     memset(sprite, 0, sizeof(Sprite));
     sprite->name = keepName;

@@ -7534,7 +7534,7 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
     uint32_t maxHeight = 0;
     int32_t biggestShift = 0;
     repeat(glyphCount, i) {
-        int32_t tpagIdx = DataWin_resolveTPAG(dw, sprite->textureOffsets[i]);
+        int32_t tpagIdx = sprite->tpagIndices[i];
         if (0 > tpagIdx) continue;
         TexturePageItem* tpag = &dw->tpag.items[tpagIdx];
         if (tpag->boundingHeight > maxHeight) maxHeight = tpag->boundingHeight;
@@ -7553,7 +7553,7 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
     FontGlyph* glyphs = safeMalloc(totalGlyphs * sizeof(FontGlyph));
 
     repeat(glyphCount, i) {
-        int32_t tpagIdx = DataWin_resolveTPAG(dw, sprite->textureOffsets[i]);
+        int32_t tpagIdx = sprite->tpagIndices[i];
         FontGlyph* glyph = &glyphs[i];
         glyph->character = charCodes[i];
         glyph->kerningCount = 0;
@@ -7611,7 +7611,7 @@ static RValue fontAddSpriteImpl(VMContext* ctx, int32_t spriteIndex, uint16_t* c
     font->charset = 0;
     font->antiAliasing = 0;
     font->rangeEnd = 0;
-    font->textureOffset = 0; // not used for sprite fonts
+    font->tpagIndex = -1; // not used for sprite fonts
     font->scaleX = 1.0f;
     font->scaleY = 1.0f;
     font->ascenderOffset = 0;

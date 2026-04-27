@@ -1244,7 +1244,7 @@ static bool gsResolveFontState(GsRenderer* gs, DataWin* dw, Font* font, GsFontSt
     state->spriteFontSprite = nullptr;
 
     if (!font->isSpriteFont) {
-        int32_t fontTpagIndex = DataWin_resolveTPAG(dw, font->textureOffset);
+        int32_t fontTpagIndex = font->tpagIndex;
         if (0 > fontTpagIndex) return false;
 
         if (!setupTextureForTPAG(gs, &state->tex, fontTpagIndex)) return false;
@@ -1271,8 +1271,7 @@ static bool gsResolveGlyph(GsRenderer* gs, DataWin* dw, GsFontState* state, Font
         int32_t glyphIndex = (int32_t) (glyph - font->glyphs);
         if (0 > glyphIndex || glyphIndex >= (int32_t) sprite->textureCount) return false;
 
-        uint32_t tpagOffset = sprite->textureOffsets[glyphIndex];
-        int32_t tpagIdx = DataWin_resolveTPAG(dw, tpagOffset);
+        int32_t tpagIdx = sprite->tpagIndices[glyphIndex];
         if (0 > tpagIdx) return false;
 
         if (!setupTextureForTPAG(gs, outTex, tpagIdx)) return false;

@@ -61,8 +61,7 @@ static int32_t Renderer_resolveTPAGIndex(DataWin* dataWin, int32_t spriteIndex, 
     int32_t frameIndex = subimg % (int32_t) sprite->textureCount;
     if (0 > frameIndex) frameIndex += (int32_t) sprite->textureCount;
 
-    uint32_t tpagOffset = sprite->textureOffsets[frameIndex];
-    return DataWin_resolveTPAG(dataWin, tpagOffset);
+    return sprite->tpagIndices[frameIndex];
 }
 
 // Convenience: draw_sprite(sprite, subimg, x, y)
@@ -166,18 +165,18 @@ static void Renderer_drawSpritePartExt(Renderer* renderer, int32_t spriteIndex, 
     renderer->vtable->drawSpritePart(renderer, tpagIndex, left, top, width, height, x, y, xscale, yscale, color, alpha);
 }
 
-// Resolves a BGND index to a TPAG index via Background.textureOffset -> DataWin_resolveTPAG()
+// Resolves a BGND index to its TPAG index.
 static int32_t Renderer_resolveBackgroundTPAGIndex(DataWin* dataWin, int32_t bgndIndex) {
     if (0 > bgndIndex || (uint32_t) bgndIndex >= dataWin->bgnd.count) return -1;
-    Background* bg = &dataWin->bgnd.backgrounds[bgndIndex];
-    return DataWin_resolveTPAG(dataWin, bg->textureOffset);
+    return dataWin->bgnd.backgrounds[bgndIndex].tpagIndex;
 }
 
-// Resolves a SPRT index to a TPAG index via Sprite.textureOffset -> DataWin_resolveTPAG()
+// Resolves a SPRT index to the TPAG index of its first frame.
 static int32_t Renderer_resolveSpriteTPAGIndex(DataWin* dataWin, int32_t sprtIndex) {
     if (0 > sprtIndex || (uint32_t) sprtIndex >= dataWin->sprt.count) return -1;
-    Sprite* bg = &dataWin->sprt.sprites[sprtIndex];
-    return DataWin_resolveTPAG(dataWin, bg->textureOffsets[0]);
+    Sprite* spr = &dataWin->sprt.sprites[sprtIndex];
+    if (spr->textureCount == 0) return -1;
+    return spr->tpagIndices[0];
 }
 
 // Resolves a SPRT or BGND index to a TPAG index

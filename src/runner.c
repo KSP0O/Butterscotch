@@ -487,7 +487,7 @@ static void Runner_drawTileLayer(Runner* runner, RoomLayerTilesData* data, float
     Background* tileset = &dw->bgnd.backgrounds[data->backgroundIndex];
     if (tileset->gms2TileWidth == 0 || tileset->gms2TileHeight == 0 || tileset->gms2TileColumns == 0) return;
 
-    int32_t tpagIndex = DataWin_resolveTPAG(dw, tileset->textureOffset);
+    int32_t tpagIndex = tileset->tpagIndex;
     if (0 > tpagIndex) return;
 
     uint32_t tileW = tileset->gms2TileWidth;

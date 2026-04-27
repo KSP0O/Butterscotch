@@ -207,7 +207,7 @@ typedef struct {
     bool gms2PlaybackSpeedType;
     bool specialType;
     uint32_t textureCount;
-    uint32_t* textureOffsets; // absolute file offsets to TexturePageItems
+    int32_t* tpagIndices;    // resolved TPAG indices (one per frame); -1 for unresolved
     uint32_t maskCount;       // number of collision masks (one per frame, or 0)
     uint8_t** masks;          // array of maskCount packed bit arrays (nullptr if none)
 } Sprite;
@@ -224,7 +224,7 @@ typedef struct {
     bool transparent;
     bool smooth;
     bool preload;
-    uint32_t textureOffset; // absolute file offset to TexturePageItem
+    int32_t tpagIndex;      // resolved TPAG index, -1 if unresolved
     uint32_t gms2UnknownAlways2;
     uint32_t gms2TileWidth;
     uint32_t gms2TileHeight;
@@ -361,7 +361,7 @@ typedef struct {
     uint8_t charset;
     uint8_t antiAliasing;
     uint32_t rangeEnd;
-    uint32_t textureOffset; // absolute file offset to TexturePageItem
+    int32_t tpagIndex;      // resolved TPAG index, -1 if unresolved
     float scaleX;
     float scaleY;
     int32_t ascenderOffset; // bytecodeVersion >= 17 only
@@ -815,11 +815,6 @@ typedef struct DataWin {
 
     DetectedFormat detectedFormat;
 
-    // Lookup map: absolute file offset -> TPAG index (built during TPAG parsing)
-    struct { uint32_t key; int32_t value; }* tpagOffsetMap;
-    // Lookup map: absolute file offset -> SPRT index (built during SPRT parsing)
-    struct { uint32_t key; int32_t value; }* sprtOffsetMap;
-
     // Held open across the whole session when DataWinParserOptions.lazyLoadRooms is true.
     // Used by DataWin_loadRoomPayload to satisfy on-demand room payload reads.
     // nullptr when lazy loading is disabled. Closed by DataWin_free.
@@ -834,8 +829,6 @@ void DataWin_printDebugSummary(DataWin* dataWin);
 // Lazy room payload management. DataWin_loadRoomPayload is a no-op when the payload is already loaded.
 void DataWin_loadRoomPayload(DataWin* dw, int32_t roomIndex);
 void DataWin_freeRoomPayload(Room* room);
-int32_t DataWin_resolveTPAG(DataWin* dw, uint32_t offset);
-int32_t DataWin_resolveSPRT(DataWin* dw, uint32_t offset);
 // Finds a reusable dynamic Sprite slot (textureCount == 0) at or above `startIndex`, or appends a new one.
 uint32_t DataWin_allocSpriteSlot(DataWin* dw, uint32_t startIndex);
 // Compares the detected effective GMS version (not the raw GEN8 version) against a lower bound.
