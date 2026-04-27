@@ -32,6 +32,7 @@ void SpatialGrid_free(SpatialGrid* grid) {
         arrfree(grid->grid[i]);
     }
     free(grid->grid);
+    arrfree(grid->dirtyInstances);
     free(grid);
 }
 
