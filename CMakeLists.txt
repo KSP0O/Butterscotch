@@ -59,7 +59,7 @@ if(PLATFORM STREQUAL "glfw")
     endif()
 
     # Spatial grid logs
-    option(ENABLE_SPATIAL_GRID_LOGS "Enable Spatial Grid logs" ON)
+    option(ENABLE_SPATIAL_GRID_LOGS "Enable Spatial Grid logs" OFF)
     if(ENABLE_SPATIAL_GRID_LOGS)
         add_compile_definitions(ENABLE_SPATIAL_GRID_LOGS)
     endif()
