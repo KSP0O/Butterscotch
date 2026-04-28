@@ -124,19 +124,28 @@ static inline float TextUtils_lineStride(Font* font) {
 static inline float TextUtils_measureLineWidth(Font* font, const char* line, int32_t len) {
     float width = 0;
     int32_t pos = 0;
-    while (len > pos) {
-        uint16_t ch = TextUtils_decodeUtf8(line, len, &pos);
+    uint16_t ch = 0;
+    bool hasCh = false;
+    if (len > pos) {
+        ch = TextUtils_decodeUtf8(line, len, &pos);
+        hasCh = true;
+    }
+
+    while (hasCh) {
         FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-        if (glyph == nullptr) continue;
 
-        width += glyph->shift;
+        // Decode the next codepoint once - reused for kerning AND as next iteration's ch
+        uint16_t nextCh = 0;
+        bool hasNext = len > pos;
+        if (hasNext) nextCh = TextUtils_decodeUtf8(line, len, &pos);
 
-        if (len > pos) {
-            int32_t savedPos = pos;
-            uint16_t nextCh = TextUtils_decodeUtf8(line, len, &pos);
-            pos = savedPos;
-            width += TextUtils_getKerningOffset(glyph, nextCh);
+        if (glyph != nullptr) {
+            width += glyph->shift;
+            if (hasNext) width += TextUtils_getKerningOffset(glyph, nextCh);
         }
+
+        ch = nextCh;
+        hasCh = hasNext;
     }
     return width;
 }

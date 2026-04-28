@@ -387,8 +387,10 @@ void Runner_executeEventForAll(Runner* runner, int32_t eventType, int32_t eventS
         Instance* inst = scratch[i];
         if (!inst->active) continue;
         // Skip non-responders without entering Runner_executeEvent. ResolvedEventTable_lookup is a tiny CSR scan; non-responders bail in a few compares and avoid the VM state save/restore overhead inside Runner_executeEventFromObject.
-        if (0 > ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, slot, nullptr)) continue;
-        Runner_executeEvent(runner, inst, eventType, eventSubtype);
+        int32_t ownerObjectIndex = -1;
+        int32_t codeId = ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, slot, &ownerObjectIndex);
+        if (0 > codeId) continue;
+        Runner_executeResolvedEvent(runner, inst, eventType, eventSubtype, codeId, ownerObjectIndex);
     }
 }
 
@@ -456,7 +458,8 @@ static inline bool Runner_hasAnyObjectWithHandler(Runner* runner, int32_t type, 
 }
 
 static void fireDrawSubtype(Runner* runner, Drawable* drawables, int32_t drawableCount, int32_t subtype) {
-    if (!Runner_hasAnyObjectWithHandler(runner, EVENT_DRAW, subtype)) return;
+    int32_t slot = EventSlotMap_lookup(&runner->eventSlotMap, EVENT_DRAW, subtype);
+    if (0 > slot) return;
 
     repeat(drawableCount, i) {
         Drawable* d = &drawables[i];
@@ -467,7 +470,10 @@ static void fireDrawSubtype(Runner* runner, Drawable* drawables, int32_t drawabl
         if (!inst->active || !inst->visible)
             continue;
 
-        Runner_executeEvent(runner, inst, EVENT_DRAW, subtype);
+        int32_t ownerObjectIndex = -1;
+        int32_t codeId = ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, slot, &ownerObjectIndex);
+        if (0 > codeId) continue;
+        Runner_executeResolvedEvent(runner, inst, EVENT_DRAW, subtype, codeId, ownerObjectIndex);
     }
 }
 
@@ -1727,6 +1733,11 @@ static void dispatchOutsideRoomEvents(Runner* runner) {
         int32_t bucketCount = (int32_t) arrlen(bucket);
         if (bucketCount == 0) continue;
 
+        // All instances in the bucket share the same exact objectIndex, so the handler resolves to one (codeId, owner).
+        int32_t ownerObjectIndex = -1;
+        int32_t codeId = ResolvedEventTable_lookup(table, objIdx, outsideSlot, &ownerObjectIndex);
+        if (0 > codeId) continue;
+
         // Snapshot the bucket: an Outside Room handler can spawn/destroy/instance_change.
         int32_t snapshotBase = (int32_t) arrlen(runner->instanceSnapshots);
         arrsetlen(runner->instanceSnapshots, snapshotBase + bucketCount);
@@ -1745,7 +1756,7 @@ static void dispatchOutsideRoomEvents(Runner* runner) {
             }
 
             if (outside && !inst->outsideRoom) {
-                Runner_executeEvent(runner, inst, EVENT_OTHER, OTHER_OUTSIDE_ROOM);
+                Runner_executeResolvedEvent(runner, inst, EVENT_OTHER, OTHER_OUTSIDE_ROOM, codeId, ownerObjectIndex);
                 if (runner->pendingRoom >= 0) {
                     arrsetlen(runner->instanceSnapshots, snapshotBase);
                     return;
@@ -1977,6 +1988,7 @@ void Runner_step(Runner* runner) {
 
     // Advance image_index by image_speed for all active instances
     int32_t animCount = (int32_t) arrlen(runner->instances);
+    int32_t animEndSlot = EventSlotMap_lookup(&runner->eventSlotMap, EVENT_OTHER, OTHER_ANIMATION_END);
     repeat(animCount, i) {
         Instance* inst = runner->instances[i];
         if (!inst->active) continue;
@@ -1987,12 +1999,18 @@ void Runner_step(Runner* runner) {
         // Wrap image_index (matches HTML5 runner: manual subtract/add instead of using fmod)
         Sprite* sprite = &runner->dataWin->sprt.sprites[inst->spriteIndex];
         float frameCount = (float) sprite->textureCount;
+        bool wrapped = false;
         if (inst->imageIndex >= frameCount) {
             inst->imageIndex -= frameCount;
-            Runner_executeEvent(runner, inst, EVENT_OTHER, OTHER_ANIMATION_END);
+            wrapped = true;
         } else if (0.0f > inst->imageIndex) {
             inst->imageIndex += frameCount;
-            Runner_executeEvent(runner, inst, EVENT_OTHER, OTHER_ANIMATION_END);
+            wrapped = true;
+        }
+        if (wrapped && animEndSlot >= 0) {
+            int32_t ownerObjectIndex = -1;
+            int32_t codeId = ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, animEndSlot, &ownerObjectIndex);
+            if (codeId >= 0) Runner_executeResolvedEvent(runner, inst, EVENT_OTHER, OTHER_ANIMATION_END, codeId, ownerObjectIndex);
         }
     }
 
@@ -2042,6 +2060,11 @@ void Runner_step(Runner* runner) {
             int32_t bucketCount = (int32_t) arrlen(bucket);
             if (bucketCount == 0) continue;
 
+            // All instances in the bucket share the same exact objectIndex, so the handler resolves to one (codeId, owner).
+            int32_t ownerObjectIndex = -1;
+            int32_t codeId = ResolvedEventTable_lookup(table, objIdx, alarmSlot, &ownerObjectIndex);
+            if (0 > codeId) continue;
+
             // Snapshot the bucket before dispatch: alarm code can call instance_change/instance_destroy/instance_create which mutate the live bucket. Iterating the snapshot also ensures newly-created instances do not fire alarms in this same phase.
             int32_t snapshotBase = (int32_t) arrlen(runner->instanceSnapshots);
             arrsetlen(runner->instanceSnapshots, snapshotBase + bucketCount);
@@ -2071,7 +2094,7 @@ void Runner_step(Runner* runner) {
                     }
 #endif
 
-                    Runner_executeEvent(runner, inst, EVENT_ALARM, alarmIdx);
+                    Runner_executeResolvedEvent(runner, inst, EVENT_ALARM, alarmIdx, codeId, ownerObjectIndex);
                 }
             }
 
@@ -2084,6 +2107,7 @@ void Runner_step(Runner* runner) {
 
     // Apply motion: friction, gravity, then x += hspeed, y += vspeed
     int32_t motionCount = (int32_t) arrlen(runner->instances);
+    int32_t endOfPathSlot = EventSlotMap_lookup(&runner->eventSlotMap, EVENT_OTHER, OTHER_END_OF_PATH);
     repeat(motionCount, mi) {
         Instance* inst = runner->instances[mi];
         if (!inst->active) continue;
@@ -2108,8 +2132,10 @@ void Runner_step(Runner* runner) {
         }
 
         // Path adaptation (HTML5: Adapt_Path, runs after friction/gravity, before x+=hspeed)
-        if (adaptPath(runner, inst)) {
-            Runner_executeEvent(runner, inst, EVENT_OTHER, OTHER_END_OF_PATH);
+        if (adaptPath(runner, inst) && endOfPathSlot >= 0) {
+            int32_t ownerObjectIndex = -1;
+            int32_t codeId = ResolvedEventTable_lookup(&runner->eventTable, inst->objectIndex, endOfPathSlot, &ownerObjectIndex);
+            if (codeId >= 0) Runner_executeResolvedEvent(runner, inst, EVENT_OTHER, OTHER_END_OF_PATH, codeId, ownerObjectIndex);
         }
 
         // Apply movement

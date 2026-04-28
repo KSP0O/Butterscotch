@@ -625,66 +625,72 @@ static void glDrawText(Renderer* renderer, const char* text, float x, float y, f
 
         float cursorX = halignOffset;
 
-        // Render each glyph in the line
+        // Render each glyph in the line - decode each codepoint once and carry it forward as next iteration's ch (also used for kerning)
         int32_t pos = 0;
-        while (lineLen > pos) {
-            uint16_t ch = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
+        uint16_t ch = 0;
+        bool hasCh = false;
+        if (lineLen > pos) {
+            ch = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
+            hasCh = true;
+        }
+
+        while (hasCh) {
             FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-            if (glyph == nullptr) continue;
-            if (glyph->sourceWidth == 0 || glyph->sourceHeight == 0) {
+
+            uint16_t nextCh = 0;
+            bool hasNext = lineLen > pos;
+            if (hasNext) nextCh = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
+
+            if (glyph != nullptr) {
+                bool drewSuccessfully = false;
+                if (glyph->sourceWidth != 0 && glyph->sourceHeight != 0) {
+                    float u0, v0, u1, v1;
+                    float localX0, localY0;
+                    GLuint glyphTexId;
+
+                    if (glResolveGlyph(gl, dw, &fontState, glyph, cursorX, cursorY, &glyphTexId, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
+                        glBindTexture(GL_TEXTURE_2D, glyphTexId);
+
+                        float localX1 = localX0 + (float) glyph->sourceWidth;
+                        float localY1 = localY0 + (float) glyph->sourceHeight;
+
+                        // Transform corners
+                        float px0, py0, px1, py1, px2, py2, px3, py3;
+                        Matrix4f_transformPoint(&transform, localX0, localY0, &px0, &py0);
+                        Matrix4f_transformPoint(&transform, localX1, localY0, &px1, &py1);
+                        Matrix4f_transformPoint(&transform, localX1, localY1, &px2, &py2);
+                        Matrix4f_transformPoint(&transform, localX0, localY1, &px3, &py3);
+
+                        glBegin(GL_QUADS);
+                            glColor4f(r, g, b, alpha);
+                            glTexCoord2f(u0, v0);
+                            glVertex2f(px0, py0);
+
+                            glColor4f(r, g, b, alpha);
+                            glTexCoord2f(u1, v0);
+                            glVertex2f(px1, py1);
+
+                            glColor4f(r, g, b, alpha);
+                            glTexCoord2f(u1, v1);
+                            glVertex2f(px2, py2);
+
+                            glColor4f(r, g, b, alpha);
+                            glTexCoord2f(u0, v1);
+                            glVertex2f(px3, py3);
+                        glEnd();
+
+                        drewSuccessfully = true;
+                    }
+                }
+
                 cursorX += glyph->shift;
-                continue;
+                if (drewSuccessfully && hasNext) {
+                    cursorX += TextUtils_getKerningOffset(glyph, nextCh);
+                }
             }
 
-            float u0, v0, u1, v1;
-            float localX0, localY0;
-            GLuint glyphTexId;
-
-            if (!glResolveGlyph(gl, dw, &fontState, glyph, cursorX, cursorY, &glyphTexId, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
-                cursorX += glyph->shift;
-                continue;
-            }
-
-            // Flush if texture changed or batch full
-            glBindTexture(GL_TEXTURE_2D, glyphTexId);
-
-            float localX1 = localX0 + (float) glyph->sourceWidth;
-            float localY1 = localY0 + (float) glyph->sourceHeight;
-
-            // Transform corners
-            float px0, py0, px1, py1, px2, py2, px3, py3;
-            Matrix4f_transformPoint(&transform, localX0, localY0, &px0, &py0);
-            Matrix4f_transformPoint(&transform, localX1, localY0, &px1, &py1);
-            Matrix4f_transformPoint(&transform, localX1, localY1, &px2, &py2);
-            Matrix4f_transformPoint(&transform, localX0, localY1, &px3, &py3);
-
-            // Write 4 vertices
-            glBegin(GL_QUADS);            
-                glColor4f(r, g, b, alpha);
-                glTexCoord2f(u0, v0);
-                glVertex2f(px0, py0); 
-
-                glColor4f(r, g, b, alpha);
-                glTexCoord2f(u1, v0);
-                glVertex2f(px1, py1); 
-
-                glColor4f(r, g, b, alpha);
-                glTexCoord2f(u1, v1);
-                glVertex2f(px2, py2); 
-
-                glColor4f(r, g, b, alpha);
-                glTexCoord2f(u0, v1);
-                glVertex2f(px3, py3);
-            glEnd();
-
-            // Advance cursor by glyph shift + kerning
-            cursorX += glyph->shift;
-            if (lineLen > pos) {
-                int32_t savedPos = pos;
-                uint16_t nextCh = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
-                pos = savedPos;
-                cursorX += TextUtils_getKerningOffset(glyph, nextCh);
-            }
+            ch = nextCh;
+            hasCh = hasNext;
         }
 
         cursorY += lineStride;
@@ -767,9 +773,16 @@ static void glDrawTextColor(Renderer* renderer, const char* text, float x, float
 
         float cursorX = halignOffset;
 
-        // Render each glyph in the line
+        // Render each glyph in the line - decode each codepoint once and carry it forward as next iteration's ch (also used for kerning)
         int32_t pos = 0;
-        while (lineLen > pos) {
+        uint16_t ch = 0;
+        bool hasCh = false;
+        if (lineLen > pos) {
+            ch = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
+            hasCh = true;
+        }
+
+        while (hasCh) {
             // do 16.16 maths
             int32_t c2 = ((c1 & 0xff0000) + (left_delta_r & 0xff0000)) & 0xff0000;
                 c2 |= ((c1 & 0xff00) + (left_delta_g >> 8) & 0xff00) & 0xff00;
@@ -785,65 +798,64 @@ static void glDrawTextColor(Renderer* renderer, const char* text, float x, float
             right_delta_g += right_g_dx;
             right_delta_b += right_b_dx;
 
-            uint16_t ch = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
             FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-            if (glyph == nullptr) continue;
-            if (glyph->sourceWidth == 0 || glyph->sourceHeight == 0) {
+
+            uint16_t nextCh = 0;
+            bool hasNext = lineLen > pos;
+            if (hasNext) nextCh = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
+
+            if (glyph != nullptr) {
+                bool drewSuccessfully = false;
+                if (glyph->sourceWidth != 0 && glyph->sourceHeight != 0) {
+                    float u0, v0, u1, v1;
+                    float localX0, localY0;
+                    GLuint glyphTexId;
+
+                    if (glResolveGlyph(gl, dw, &fontState, glyph, cursorX, cursorY, &glyphTexId, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
+                        glBindTexture(GL_TEXTURE_2D, glyphTexId);
+
+                        float localX1 = localX0 + (float) glyph->sourceWidth;
+                        float localY1 = localY0 + (float) glyph->sourceHeight;
+
+                        // Transform corners
+                        float px0, py0, px1, py1, px2, py2, px3, py3;
+                        Matrix4f_transformPoint(&transform, localX0, localY0, &px0, &py0);
+                        Matrix4f_transformPoint(&transform, localX1, localY0, &px1, &py1);
+                        Matrix4f_transformPoint(&transform, localX1, localY1, &px2, &py2);
+                        Matrix4f_transformPoint(&transform, localX0, localY1, &px3, &py3);
+
+                        glBegin(GL_QUADS);
+                            glColor4ub(BGR_R(c1), BGR_G(c1), BGR_B(c1), alpha * 255);
+                            glTexCoord2f(u0, v0);
+                            glVertex2f(px0, py0);
+
+                            glColor4ub(BGR_R(c2), BGR_G(c2), BGR_B(c2), alpha * 255);
+                            glTexCoord2f(u1, v0);
+                            glVertex2f(px1, py1);
+
+                            glColor4ub(BGR_R(c3), BGR_G(c3), BGR_B(c3), alpha * 255);
+                            glTexCoord2f(u1, v1);
+                            glVertex2f(px2, py2);
+
+                            glColor4ub(BGR_R(c4), BGR_G(c4), BGR_B(c4), alpha * 255);
+                            glTexCoord2f(u0, v1);
+                            glVertex2f(px3, py3);
+                        glEnd();
+
+                        drewSuccessfully = true;
+                    }
+                }
+
                 cursorX += glyph->shift;
-                continue;
+                if (drewSuccessfully) {
+                    if (hasNext) cursorX += TextUtils_getKerningOffset(glyph, nextCh);
+                    c4 = c3;    // set left edge to be what the last right edge was....
+                    c1 = c2;
+                }
             }
 
-            float u0, v0, u1, v1;
-            float localX0, localY0;
-            GLuint glyphTexId;
-
-            if (!glResolveGlyph(gl, dw, &fontState, glyph, cursorX, cursorY, &glyphTexId, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
-                cursorX += glyph->shift;
-                continue;
-            }
-
-            // Flush if texture changed or batch full
-            glBindTexture(GL_TEXTURE_2D, glyphTexId);
-
-            float localX1 = localX0 + (float) glyph->sourceWidth;
-            float localY1 = localY0 + (float) glyph->sourceHeight;
-
-            // Transform corners
-            float px0, py0, px1, py1, px2, py2, px3, py3;
-            Matrix4f_transformPoint(&transform, localX0, localY0, &px0, &py0);
-            Matrix4f_transformPoint(&transform, localX1, localY0, &px1, &py1);
-            Matrix4f_transformPoint(&transform, localX1, localY1, &px2, &py2);
-            Matrix4f_transformPoint(&transform, localX0, localY1, &px3, &py3);
-
-            // Write 4 vertices
-            glBegin(GL_QUADS);            
-                glColor4ub(BGR_R(c1), BGR_G(c1), BGR_B(c1), alpha * 255);
-                glTexCoord2f(u0, v0);
-                glVertex2f(px0, py0); 
-
-                glColor4ub(BGR_R(c2), BGR_G(c2), BGR_B(c2), alpha * 255);
-                glTexCoord2f(u1, v0);
-                glVertex2f(px1, py1); 
-
-                glColor4ub(BGR_R(c3), BGR_G(c3), BGR_B(c3), alpha * 255);
-                glTexCoord2f(u1, v1);
-                glVertex2f(px2, py2); 
-
-                glColor4ub(BGR_R(c4), BGR_G(c4), BGR_B(c4), alpha * 255);
-                glTexCoord2f(u0, v1);
-                glVertex2f(px3, py3);
-            glEnd();
-
-            // Advance cursor by glyph shift + kerning
-            cursorX += glyph->shift;
-            if (lineLen > pos) {
-                int32_t savedPos = pos;
-                uint16_t nextCh = TextUtils_decodeUtf8(text + lineStart, lineLen, &pos);
-                pos = savedPos;
-                cursorX += TextUtils_getKerningOffset(glyph, nextCh);
-            }
-            c4 = c3;    // set left edge to be what the last right edge was....
-		    c1 = c2;    //
+            ch = nextCh;
+            hasCh = hasNext;
         }
 
         cursorY += lineStride;

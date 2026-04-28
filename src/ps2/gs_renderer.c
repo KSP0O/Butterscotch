@@ -1483,40 +1483,49 @@ static void gsDrawText(Renderer* renderer, const char* text, float x, float y, f
 
         float cursorX = halignOffset;
 
-        // Draw each glyph
+        // Draw each glyph - decode each codepoint once and carry it forward as next iteration's ch (also used for kerning)
         int32_t pos = 0;
-        while (lineLen > pos) {
-            uint16_t ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+        uint16_t ch = 0;
+        bool hasCh = false;
+        if (lineLen > pos) {
+            ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+            hasCh = true;
+        }
+
+        while (hasCh) {
             FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-            if (glyph == nullptr) continue;
 
-            if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
-                GSTEXTURE glyphTex;
-                float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
-                float localX0, localY0;
+            uint16_t nextCh = 0;
+            bool hasNext = lineLen > pos;
+            if (hasNext) nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
 
-                if (!gsResolveGlyph(gs, dw, &fontState, glyph, cursorX, cursorY, &glyphTex, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
-                    cursorX += (float) glyph->shift;
-                    continue;
+            if (glyph != nullptr) {
+                bool resolveOk = true;
+                if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
+                    GSTEXTURE glyphTex;
+                    float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+                    float localX0, localY0;
+
+                    if (gsResolveGlyph(gs, dw, &fontState, glyph, cursorX, cursorY, &glyphTex, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
+                        float sx1 = localX0 * screenScaleX + screenBaseX;
+                        float sy1 = localY0 * screenScaleY + screenBaseY;
+                        float sx2 = sx1 + (float) glyph->sourceWidth * screenScaleX;
+                        float sy2 = sy1 + (float) glyph->sourceHeight * screenScaleY;
+
+                        gsKit_prim_sprite_texture(gs->gsGlobal, &glyphTex, sx1, sy1, u0, v0, sx2, sy2, u1, v1, 0, textColor);
+                    } else {
+                        resolveOk = false;
+                    }
                 }
 
-                float sx1 = localX0 * screenScaleX + screenBaseX;
-                float sy1 = localY0 * screenScaleY + screenBaseY;
-                float sx2 = sx1 + (float) glyph->sourceWidth * screenScaleX;
-                float sy2 = sy1 + (float) glyph->sourceHeight * screenScaleY;
-
-                gsKit_prim_sprite_texture(gs->gsGlobal, &glyphTex, sx1, sy1, u0, v0, sx2, sy2, u1, v1, 0, textColor);
+                cursorX += (float) glyph->shift;
+                if (resolveOk && hasNext) {
+                    cursorX += TextUtils_getKerningOffset(glyph, nextCh);
+                }
             }
 
-            cursorX += (float) glyph->shift;
-
-            // Kerning
-            if (lineLen > pos) {
-                int32_t savedPos = pos;
-                uint16_t nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
-                pos = savedPos;
-                cursorX += TextUtils_getKerningOffset(glyph, nextCh);
-            }
+            ch = nextCh;
+            hasCh = hasNext;
         }
 
         // Next line
@@ -1634,49 +1643,58 @@ static void gsDrawTextColor(Renderer* renderer, const char* text, float x, float
 
         float cursorX = halignOffset;
 
-        // Draw each glyph
+        // Draw each glyph - decode each codepoint once and carry it forward as next iteration's ch (also used for kerning)
         int32_t pos = 0;
-        while (lineLen > pos) {
-            uint16_t ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+        uint16_t ch = 0;
+        bool hasCh = false;
+        if (lineLen > pos) {
+            ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+            hasCh = true;
+        }
+
+        while (hasCh) {
             FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-            if (glyph == nullptr) continue;
 
-            if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
-                GSTEXTURE glyphTex;
-                float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
-                float localX0, localY0;
+            uint16_t nextCh = 0;
+            bool hasNext = lineLen > pos;
+            if (hasNext) nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
 
-                if (!gsResolveGlyph(gs, dw, &fontState, glyph, cursorX, cursorY, &glyphTex, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
-                    cursorX += (float) glyph->shift;
-                    continue;
+            if (glyph != nullptr) {
+                bool resolveOk = true;
+                if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
+                    GSTEXTURE glyphTex;
+                    float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+                    float localX0, localY0;
+
+                    if (gsResolveGlyph(gs, dw, &fontState, glyph, cursorX, cursorY, &glyphTex, &u0, &v0, &u1, &v1, &localX0, &localY0)) {
+                        float sx1 = localX0 * screenScaleX + screenBaseX;
+                        float sy1 = localY0 * screenScaleY + screenBaseY;
+                        float sx2 = sx1 + (float) glyph->sourceWidth * screenScaleX;
+                        float sy2 = sy1 + (float) glyph->sourceHeight * screenScaleY;
+
+                        gsKit_prim_triangle_goraud_texture_3d(gs->gsGlobal, &glyphTex,
+                                sx1, sy1, 0, u0, v0,
+                                sx2, sy1, 0, u1, v0,
+                                sx2, sy2, 0, u1, v1,
+                                textColor1, textColor2, textColor3);
+                        gsKit_prim_triangle_goraud_texture_3d(gs->gsGlobal, &glyphTex,
+                            sx1, sy1, 0, u0, v0,
+                            sx2, sy2, 0, u1, v1,
+                            sx1, sy2, 0, u0, v1,
+                            textColor1, textColor3, textColor4);
+                    } else {
+                        resolveOk = false;
+                    }
                 }
 
-                float sx1 = localX0 * screenScaleX + screenBaseX;
-                float sy1 = localY0 * screenScaleY + screenBaseY;
-                float sx2 = sx1 + (float) glyph->sourceWidth * screenScaleX;
-                float sy2 = sy1 + (float) glyph->sourceHeight * screenScaleY;
-
-                gsKit_prim_triangle_goraud_texture_3d(gs->gsGlobal, &glyphTex,
-                        sx1, sy1, 0, u0, v0,
-                        sx2, sy1, 0, u1, v0,
-                        sx2, sy2, 0, u1, v1,
-                        textColor1, textColor2, textColor3);
-                gsKit_prim_triangle_goraud_texture_3d(gs->gsGlobal, &glyphTex,
-                    sx1, sy1, 0, u0, v0,
-                    sx2, sy2, 0, u1, v1,
-                    sx1, sy2, 0, u0, v1,
-                    textColor1, textColor3, textColor4);
+                cursorX += (float) glyph->shift;
+                if (resolveOk && hasNext) {
+                    cursorX += TextUtils_getKerningOffset(glyph, nextCh);
+                }
             }
 
-            cursorX += (float) glyph->shift;
-
-            // Kerning
-            if (lineLen > pos) {
-                int32_t savedPos = pos;
-                uint16_t nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
-                pos = savedPos;
-                cursorX += TextUtils_getKerningOffset(glyph, nextCh);
-            }
+            ch = nextCh;
+            hasCh = hasNext;
         }
 
         // Next line

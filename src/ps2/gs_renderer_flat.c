@@ -247,37 +247,44 @@ static void gsDrawText(Renderer* renderer, const char* text, float x, float y, f
 
         float cursorX = halignOffset;
 
-        // Draw each glyph as a colored rectangle
+        // Draw each glyph as a colored rectangle - decode each codepoint once and carry it forward as next iteration's ch (also used for kerning)
         int32_t pos = 0;
-        while (lineLen > pos) {
-            uint16_t ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+        uint16_t ch = 0;
+        bool hasCh = false;
+        if (lineLen > pos) {
+            ch = TextUtils_decodeUtf8(line, lineLen, &pos);
+            hasCh = true;
+        }
+
+        while (hasCh) {
             FontGlyph* glyph = TextUtils_findGlyph(font, ch);
-            if (glyph == nullptr) continue;
 
-            if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
-                float glyphX = x + (cursorX + (float) glyph->offset) * xscale * font->scaleX;
-                float glyphY = y + cursorY * yscale * font->scaleY;
-                float glyphW = (float) glyph->sourceWidth * xscale * font->scaleX;
-                float glyphH = (float) glyph->sourceHeight * yscale * font->scaleY;
+            uint16_t nextCh = 0;
+            bool hasNext = lineLen > pos;
+            if (hasNext) nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
 
-                // Apply view offset and scale to screen coordinates
-                float sx1 = (glyphX - (float) gs->viewX) * gs->scaleX + gs->offsetX;
-                float sy1 = (glyphY - (float) gs->viewY) * gs->scaleY + gs->offsetY;
-                float sx2 = (glyphX + glyphW - (float) gs->viewX) * gs->scaleX + gs->offsetX;
-                float sy2 = (glyphY + glyphH - (float) gs->viewY) * gs->scaleY + gs->offsetY;
+            if (glyph != nullptr) {
+                if (glyph->sourceWidth > 0 && glyph->sourceHeight > 0) {
+                    float glyphX = x + (cursorX + (float) glyph->offset) * xscale * font->scaleX;
+                    float glyphY = y + cursorY * yscale * font->scaleY;
+                    float glyphW = (float) glyph->sourceWidth * xscale * font->scaleX;
+                    float glyphH = (float) glyph->sourceHeight * yscale * font->scaleY;
 
-                gsKit_prim_sprite(gs->gsGlobal, sx1, sy1, sx2, sy2, 0, textColor);
+                    // Apply view offset and scale to screen coordinates
+                    float sx1 = (glyphX - (float) gs->viewX) * gs->scaleX + gs->offsetX;
+                    float sy1 = (glyphY - (float) gs->viewY) * gs->scaleY + gs->offsetY;
+                    float sx2 = (glyphX + glyphW - (float) gs->viewX) * gs->scaleX + gs->offsetX;
+                    float sy2 = (glyphY + glyphH - (float) gs->viewY) * gs->scaleY + gs->offsetY;
+
+                    gsKit_prim_sprite(gs->gsGlobal, sx1, sy1, sx2, sy2, 0, textColor);
+                }
+
+                cursorX += (float) glyph->shift;
+                if (hasNext) cursorX += TextUtils_getKerningOffset(glyph, nextCh);
             }
 
-            cursorX += (float) glyph->shift;
-
-            // Apply kerning
-            if (lineLen > pos) {
-                int32_t savedPos = pos;
-                uint16_t nextCh = TextUtils_decodeUtf8(line, lineLen, &pos);
-                pos = savedPos;
-                cursorX += TextUtils_getKerningOffset(glyph, nextCh);
-            }
+            ch = nextCh;
+            hasCh = hasNext;
         }
 
         // Advance to next line
