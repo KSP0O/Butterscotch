@@ -517,9 +517,46 @@ static Instance* findInstanceByTarget(VMContext* ctx, int32_t target) {
     return nullptr;
 }
 
+// Inline read of a non-array, non-builtin variable from a simple scope.
+// Returns false when the instanceType isn't covered or the scope's instance pointer is unavailable, so the caller can fall through to the full resolveVariableRead.
+// Used by the OP_PUSH/PUSHLOC/PUSHGLB fast paths in executeLoop to skip the entire resolveVariableRead dispatch overhead.
+static inline bool tryFastVarRead(VMContext* ctx, int32_t instanceType, Variable* varDef, RValue* out) {
+    switch (instanceType) {
+        case INSTANCE_SELF: {
+            Instance* inst = (Instance*) ctx->currentInstance;
+            if (inst == nullptr) return false;
+            RValue* slot = IntRValueHashMap_findSlot(&inst->selfVars, varDef->varID);
+            *out = (slot != nullptr) ? *slot : (RValue){ .type = RVALUE_UNDEFINED };
+            out->ownsString = false;
+            return true;
+        }
+        case INSTANCE_LOCAL: {
+            uint32_t localSlot = resolveLocalSlot(ctx, varDef->varID);
+            require(ctx->localVarCount > localSlot);
+            *out = ctx->localVars[localSlot];
+            out->ownsString = false;
+            return true;
+        }
+        case INSTANCE_GLOBAL: {
+            require(ctx->globalVarCount > (uint32_t) varDef->varID);
+            *out = ctx->globalVars[varDef->varID];
+            out->ownsString = false;
+            return true;
+        }
+        case INSTANCE_OTHER: {
+            Instance* inst = (Instance*) ctx->otherInstance;
+            if (inst == nullptr) return false;
+            RValue* slot = IntRValueHashMap_findSlot(&inst->selfVars, varDef->varID);
+            *out = (slot != nullptr) ? *slot : (RValue){ .type = RVALUE_UNDEFINED };
+            out->ownsString = false;
+            return true;
+        }
+    }
+    return false;
+}
+
 static RValue resolveVariableRead(VMContext* ctx, int32_t instanceType, uint32_t varRef) {
     Variable* varDef = resolveVarDef(ctx, varRef);
-
     ArrayAccess access = popArrayAccess(ctx, varRef);
 
     // Use instance type from stack when available (VARTYPE_ARRAY / VARTYPE_STACKTOP)
@@ -1085,9 +1122,7 @@ static RValue convertValue(RValue val, uint8_t targetType) {
 
 // ===[ Opcode Handlers ]===
 
-static void handlePush(VMContext* ctx, uint32_t instr, const uint8_t* extraData) {
-    uint8_t type1 = instrType1(instr);
-
+static void handlePush(VMContext* ctx, uint32_t instr, const uint8_t* extraData, uint8_t type1) {
     switch (type1) {
         case GML_TYPE_DOUBLE:
             stackPush(ctx, RValue_makeReal(BinaryUtils_readFloat64Aligned(extraData)));
@@ -1213,37 +1248,6 @@ static void pushTopLevelArrayRef(VMContext* ctx, RValue* slot) {
     stackPush(ctx, RValue_makeArrayWeak(slot->array));
 }
 #endif
-
-static void handlePushLoc(VMContext* ctx, const uint8_t* extraData) {
-    uint32_t varRef = resolveVarOperand(extraData);
-#if IS_BC17_OR_HIGHER_ENABLED
-    uint8_t varType = (varRef >> 24) & 0xF8;
-    if (varType == VARTYPE_ARRAYPUSHAF || varType == VARTYPE_ARRAYPOPAF) {
-        Variable* varDef = resolveVarDef(ctx, varRef);
-        uint32_t localSlot = resolveLocalSlot(ctx, varDef->varID);
-        require(ctx->localVarCount > localSlot);
-        pushTopLevelArrayRef(ctx, &ctx->localVars[localSlot]);
-        return;
-    }
-#endif
-    RValue val = resolveVariableRead(ctx, INSTANCE_LOCAL, varRef);
-    stackPushTyped(ctx, val, GML_TYPE_VARIABLE);
-}
-
-static void handlePushGlb(VMContext* ctx, const uint8_t* extraData) {
-    uint32_t varRef = resolveVarOperand(extraData);
-#if IS_BC17_OR_HIGHER_ENABLED
-    uint8_t varType = (varRef >> 24) & 0xF8;
-    if (varType == VARTYPE_ARRAYPUSHAF || varType == VARTYPE_ARRAYPOPAF) {
-        Variable* varDef = resolveVarDef(ctx, varRef);
-        require(ctx->globalVarCount > (uint32_t) varDef->varID);
-        pushTopLevelArrayRef(ctx, &ctx->globalVars[varDef->varID]);
-        return;
-    }
-#endif
-    RValue val = resolveVariableRead(ctx, INSTANCE_GLOBAL, varRef);
-    stackPushTyped(ctx, val, GML_TYPE_VARIABLE);
-}
 
 static void handlePushBltn(VMContext* ctx, uint32_t instr, const uint8_t* extraData) {
     uint32_t varRef = resolveVarOperand(extraData);
@@ -2754,15 +2758,67 @@ static RValue executeLoop(VMContext* ctx) {
 
         switch (opcode) {
             // Push instructions
-            case OP_PUSH:
-                handlePush(ctx, instr, extraData);
+            case OP_PUSH: {
+                uint8_t type1 = instrType1(instr);
+                // Inline fast paths for variable reads (not ints, doubles, etc, only VARIABLES) that are "normal" type (not arrays, not stacktop, and not the new fangled BC17 array reads)
+                if (type1 == GML_TYPE_VARIABLE) {
+                    uint32_t varRef = resolveVarOperand(extraData);
+                    uint8_t varType = (uint8_t) ((varRef >> 24) & 0xF8);
+                    if (varType == VARTYPE_NORMAL) {
+                        Variable* varDef = resolveVarDef(ctx, varRef);
+                        if (varDef->varID >= 0) {
+                            int32_t instanceType = (int32_t) instrInstanceType(instr);
+                            RValue val;
+                            if (tryFastVarRead(ctx, instanceType, varDef, &val)) {
+                                stackPushTyped(ctx, val, GML_TYPE_VARIABLE);
+                                break;
+                            }
+                        }
+                    }
+                }
+                handlePush(ctx, instr, extraData, type1);
                 break;
-            case OP_PUSHLOC:
-                handlePushLoc(ctx, extraData);
+            }
+            case OP_PUSHLOC: {
+                uint32_t varRef = resolveVarOperand(extraData);
+#if IS_BC17_OR_HIGHER_ENABLED
+                uint8_t varType = (uint8_t) ((varRef >> 24) & 0xF8);
+                if (varType == VARTYPE_ARRAYPUSHAF || varType == VARTYPE_ARRAYPOPAF) {
+                    Variable* varDef = resolveVarDef(ctx, varRef);
+                    uint32_t localSlot = resolveLocalSlot(ctx, varDef->varID);
+                    require(ctx->localVarCount > localSlot);
+                    pushTopLevelArrayRef(ctx, &ctx->localVars[localSlot]);
+                    break;
+                }
+#endif
+                // Locals are always non-builtin (varID >= 0); inline the read straight from localVars[].
+                Variable* varDef = resolveVarDef(ctx, varRef);
+                uint32_t localSlot = resolveLocalSlot(ctx, varDef->varID);
+                require(ctx->localVarCount > localSlot);
+                RValue val = ctx->localVars[localSlot];
+                val.ownsString = false;
+                stackPushTyped(ctx, val, GML_TYPE_VARIABLE);
                 break;
-            case OP_PUSHGLB:
-                handlePushGlb(ctx, extraData);
+            }
+            case OP_PUSHGLB: {
+                uint32_t varRef = resolveVarOperand(extraData);
+#if IS_BC17_OR_HIGHER_ENABLED
+                uint8_t varType = (uint8_t) ((varRef >> 24) & 0xF8);
+                if (varType == VARTYPE_ARRAYPUSHAF || varType == VARTYPE_ARRAYPOPAF) {
+                    Variable* varDef = resolveVarDef(ctx, varRef);
+                    require(ctx->globalVarCount > (uint32_t) varDef->varID);
+                    pushTopLevelArrayRef(ctx, &ctx->globalVars[varDef->varID]);
+                    break;
+                }
+#endif
+                // Globals are always non-builtin (varID >= 0); inline the read straight from globalVars[].
+                Variable* varDef = resolveVarDef(ctx, varRef);
+                require(ctx->globalVarCount > (uint32_t) varDef->varID);
+                RValue val = ctx->globalVars[varDef->varID];
+                val.ownsString = false;
+                stackPushTyped(ctx, val, GML_TYPE_VARIABLE);
                 break;
+            }
             case OP_PUSHBLTN:
                 handlePushBltn(ctx, instr, extraData);
                 break;
