@@ -1309,9 +1309,7 @@ static inline RValue coerceIntStoreToReal(RValue val, uint8_t type2) {
     return val;
 }
 
-static void handlePop(VMContext* ctx, uint32_t instr, uint8_t type1, uint32_t varRef, uint8_t varType, int32_t instanceType) {
-    uint8_t type2 = instrType2(instr);   // source type (what's on stack)
-
+static void handlePop(VMContext* ctx, uint32_t instr, uint8_t type1, uint8_t type2, uint32_t varRef, uint8_t varType, int32_t instanceType) {
     RValue val;
     int32_t arrayIndex = -1;
 
@@ -2813,13 +2811,14 @@ static RValue executeLoop(VMContext* ctx) {
                 uint32_t varRef = resolveVarOperand(extraData);
                 uint8_t varType = (uint8_t) ((varRef >> 24) & 0xF8);
                 int32_t instanceType = instrInstanceType(instr);
+                int32_t type2 = instrType2(instr); // source type (what's on stack)
                 if (type1 == GML_TYPE_VARIABLE && varType == VARTYPE_NORMAL) {
                     // Inline fast path for the simple variable-assignment case: type1==VARIABLE, which is ~99.998% of all Pops in real workloads
                     RValue val = stackPop(ctx);
-                    val = coerceIntStoreToReal(val, instrType2(instr));
+                    val = coerceIntStoreToReal(val, type2);
                     resolveVariableWrite(ctx, instanceType, varRef, val);
                 } else {
-                    handlePop(ctx, instr, type1, varRef, varType, instanceType);
+                    handlePop(ctx, instr, type1, type2, varRef, varType, instanceType);
                 }
                 break;
             }
