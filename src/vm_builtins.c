@@ -5127,7 +5127,7 @@ static RValue builtin_drawSpritePartExt(VMContext* ctx, RValue* args, MAYBE_UNUS
         subimg = (int32_t) ((Instance*) ctx->currentInstance)->imageIndex;
     }
 
-    Renderer_drawSpritePartExt(runner->renderer, spriteIndex, subimg, left, top, width, height, x, y, xscale, yscale, color, alpha);
+    Renderer_drawSpritePartExt(runner->renderer, spriteIndex, subimg, left, top, width, height, x, y, xscale, yscale, 0.0f, 0.0f, 0.0f, color, alpha);
     return RValue_makeUndefined();
 }
 
@@ -5496,7 +5496,7 @@ static RValue builtin_drawBackgroundPartExt(VMContext* ctx, RValue* args, MAYBE_
     int32_t tpagIndex = Renderer_resolveBackgroundTPAGIndex(runner->dataWin, bgIndex);
     if (0 > tpagIndex) return RValue_makeUndefined();
 
-    runner->renderer->vtable->drawSpritePart(runner->renderer, tpagIndex, left, top, width, height, x, y, xscale, yscale, color, alpha);
+    runner->renderer->vtable->drawSpritePart(runner->renderer, tpagIndex, left, top, width, height, x, y, xscale, yscale, 0.0f, 0.0f, 0.0f, color, alpha);
     return RValue_makeUndefined();
 }
 

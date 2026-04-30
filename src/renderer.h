@@ -45,7 +45,7 @@ typedef struct {
     void (*beginGUI)(Renderer* renderer, int32_t guiW, int32_t guiH, int32_t portX, int32_t portY, int32_t portW, int32_t portH);
     void (*endGUI)(Renderer* renderer);
     void (*drawSprite)(Renderer* renderer, int32_t tpagIndex, float x, float y, float originX, float originY, float xscale, float yscale, float angleDeg, uint32_t color, float alpha);
-    void (*drawSpritePart)(Renderer* renderer, int32_t tpagIndex, int32_t srcOffX, int32_t srcOffY, int32_t srcW, int32_t srcH, float x, float y, float xscale, float yscale, uint32_t color, float alpha);
+    void (*drawSpritePart)(Renderer* renderer, int32_t tpagIndex, int32_t srcOffX, int32_t srcOffY, int32_t srcW, int32_t srcH, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha);
     void (*drawSpritePos)(Renderer* renderer, int32_t tpagIndex, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, float alpha);
     void (*drawRectangle)(Renderer* renderer, float x1, float y1, float x2, float y2, uint32_t color, float alpha, bool outline);
     void (*drawLine)(Renderer* renderer, float x1, float y1, float x2, float y2, float width, uint32_t color, float alpha);
@@ -97,13 +97,13 @@ static int32_t Renderer_resolveTPAGIndex(DataWin* dataWin, int32_t spriteIndex, 
 }
 
 // Forward declaration: defined further down once drawSpritePartExt is available.
-static void Renderer_drawSpriteNineSlice(Renderer* renderer, int32_t spriteIndex, int32_t subimg, float x, float y, float w, float h, uint32_t color, float alpha);
+static void Renderer_drawSpriteNineSlice(Renderer* renderer, int32_t spriteIndex, int32_t subimg, float x, float y, float w, float h, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha);
 
 // Stretched: draw_sprite_stretched(sprite, subimg, x, y, w, h)
 static void Renderer_drawSpriteStretched(Renderer* renderer, int32_t spriteIndex, int32_t subimg, float x, float y, float w, float h, uint32_t color, float alpha) {
     DataWin* dw = renderer->dataWin;
     if (spriteIndex >= 0 && (uint32_t) spriteIndex < dw->sprt.count && dw->sprt.sprites[spriteIndex].nineSliceEnabled) {
-        Renderer_drawSpriteNineSlice(renderer, spriteIndex, subimg, x, y, w, h, color, alpha);
+        Renderer_drawSpriteNineSlice(renderer, spriteIndex, subimg, x, y, w, h, 0.0f, x, y, color, alpha);
         return;
     }
 
@@ -126,10 +126,10 @@ static void Renderer_drawSpriteExt(Renderer* renderer, int32_t spriteIndex, int3
 
     // Nine-slice activates only when the draw scales the sprite away from its native size. At scale 1 there is nothing to slice.
     if (sprite->nineSliceEnabled && (xscale != 1.0f || yscale != 1.0f)) {
-        // Rotated or flipped (negative-scale) draws would need rotation-aware sub-quads, which the current drawSpritePart API can't express. Fall back to a plain scaled draw and warn once.
-        if (rot != 0.0f || 0.0f > xscale || 0.0f > yscale) {
+        // Negative-scale (mirror/flip) would require reordering slice corners; fall back to a plain scaled draw.
+        if (0.0f > xscale || 0.0f > yscale) {
             if (!sprite->nsWarnedUnsupportedTransform) {
-                fprintf(stderr, "[nine-slice] sprite '%s': nine-slice with rotation or negative scale is not implemented (rot=%g, xscale=%g, yscale=%g), falling back to a plain scaled draw\n", sprite->name ? sprite->name : "<unnamed>", (double) rot, (double) xscale, (double) yscale);
+                fprintf(stderr, "[nine-slice] sprite '%s': nine-slice with negative scale is not implemented (xscale=%g, yscale=%g), falling back to a plain scaled draw\n", sprite->name ? sprite->name : "<unnamed>", (double) xscale, (double) yscale);
                 sprite->nsWarnedUnsupportedTransform = true;
             }
         } else {
@@ -137,7 +137,7 @@ static void Renderer_drawSpriteExt(Renderer* renderer, int32_t spriteIndex, int3
             float h = (float) sprite->height * yscale;
             float tlX = x - (float) sprite->originX * xscale;
             float tlY = y - (float) sprite->originY * yscale;
-            Renderer_drawSpriteNineSlice(renderer, spriteIndex, subimg, tlX, tlY, w, h, color, alpha);
+            Renderer_drawSpriteNineSlice(renderer, spriteIndex, subimg, tlX, tlY, w, h, rot, x, y, color, alpha);
             return;
         }
     }
@@ -158,8 +158,8 @@ static void Renderer_drawSpritePos(Renderer* renderer, int32_t spriteIndex, int3
     renderer->vtable->drawSpritePos(renderer, tpagIndex, x1, y1, x2, y2, x3, y3, x4, y4, alpha);
 }
 
-// Draws part of a sprite with extended parameters (scale, color, alpha)
-static void Renderer_drawSpritePartExt(Renderer* renderer, int32_t spriteIndex, int32_t subimg, int32_t left, int32_t top, int32_t width, int32_t height, float x, float y, float xscale, float yscale, uint32_t color, float alpha) {
+// Draws part of a sprite with extended parameters (scale, rotation, color, alpha)
+static void Renderer_drawSpritePartExt(Renderer* renderer, int32_t spriteIndex, int32_t subimg, int32_t left, int32_t top, int32_t width, int32_t height, float x, float y, float xscale, float yscale, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha) {
     DataWin* dw = renderer->dataWin;
     int32_t tpagIndex = Renderer_resolveTPAGIndex(dw, spriteIndex, subimg);
     if (0 > tpagIndex) return;
@@ -189,12 +189,12 @@ static void Renderer_drawSpritePartExt(Renderer* renderer, int32_t spriteIndex, 
     if (height > tpag->sourceHeight - top) height = tpag->sourceHeight - top;
     if (0 >= width || 0 >= height) return;
 
-    renderer->vtable->drawSpritePart(renderer, tpagIndex, left, top, width, height, x, y, xscale, yscale, color, alpha);
+    renderer->vtable->drawSpritePart(renderer, tpagIndex, left, top, width, height, x, y, xscale, yscale, angleDeg, pivotX, pivotY, color, alpha);
 }
 
 // Partial draw: draw_sprite_part(sprite, subimg, left, top, width, height, x, y)
 static void Renderer_drawSpritePart(Renderer* renderer, int32_t spriteIndex, int32_t subimg, int32_t left, int32_t top, int32_t width, int32_t height, float x, float y) {
-    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, left, top, width, height, x, y, 1.0f, 1.0f, 0xFFFFFF, renderer->drawAlpha);
+    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, left, top, width, height, x, y, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0xFFFFFF, renderer->drawAlpha);
 }
 
 // Nine-slice draw into a target rect (x, y, w, h). Stretch tile mode is implemented; Repeat/Mirror/BlankRepeat/Hide
@@ -210,7 +210,7 @@ static const char* Renderer_nineSliceTileModeName(uint8_t mode) {
     }
 }
 
-static void Renderer_drawSpriteNineSlice(Renderer* renderer, int32_t spriteIndex, int32_t subimg, float x, float y, float w, float h, uint32_t color, float alpha) {
+static void Renderer_drawSpriteNineSlice(Renderer* renderer, int32_t spriteIndex, int32_t subimg, float x, float y, float w, float h, float angleDeg, float pivotX, float pivotY, uint32_t color, float alpha) {
     DataWin* dw = renderer->dataWin;
     if (0 > spriteIndex || dw->sprt.count <= (uint32_t) spriteIndex) return;
     Sprite* sprite = &dw->sprt.sprites[spriteIndex];
@@ -250,24 +250,24 @@ static void Renderer_drawSpriteNineSlice(Renderer* renderer, int32_t spriteIndex
     float ysCenter = (dstCH > 0) ? dstCH / (float) srcCH : 0.0f;
 
     // Corners: drawn at native pixel size, anchored to the four corners of the target rect.
-    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      0,      L, T, x,         y,         1.0f,     1.0f,     color, alpha);
-    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, 0,      R, T, x + w - R, y,         1.0f,     1.0f,     color, alpha);
-    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      sh - B, L, B, x,         y + h - B, 1.0f,     1.0f,     color, alpha);
-    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, sh - B, R, B, x + w - R, y + h - B, 1.0f,     1.0f,     color, alpha);
+    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      0,      L, T, x,         y,         1.0f,     1.0f,     angleDeg, pivotX, pivotY, color, alpha);
+    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, 0,      R, T, x + w - R, y,         1.0f,     1.0f,     angleDeg, pivotX, pivotY, color, alpha);
+    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      sh - B, L, B, x,         y + h - B, 1.0f,     1.0f,     angleDeg, pivotX, pivotY, color, alpha);
+    Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, sh - B, R, B, x + w - R, y + h - B, 1.0f,     1.0f,     angleDeg, pivotX, pivotY, color, alpha);
 
     // Edges: stretch only along the variable axis.
     if (dstCW > 0) {
-        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, 0,      srcCW, T, x + L, y,         xsCenter, 1.0f,     color, alpha);
-        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, sh - B, srcCW, B, x + L, y + h - B, xsCenter, 1.0f,     color, alpha);
+        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, 0,      srcCW, T, x + L, y,         xsCenter, 1.0f,     angleDeg, pivotX, pivotY, color, alpha);
+        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, sh - B, srcCW, B, x + L, y + h - B, xsCenter, 1.0f,     angleDeg, pivotX, pivotY, color, alpha);
     }
     if (dstCH > 0) {
-        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      T, L, srcCH, x,         y + T, 1.0f,     ysCenter, color, alpha);
-        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, T, R, srcCH, x + w - R, y + T, 1.0f,     ysCenter, color, alpha);
+        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, 0,      T, L, srcCH, x,         y + T, 1.0f,     ysCenter, angleDeg, pivotX, pivotY, color, alpha);
+        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, sw - R, T, R, srcCH, x + w - R, y + T, 1.0f,     ysCenter, angleDeg, pivotX, pivotY, color, alpha);
     }
 
     // Center: stretches on both axes.
     if (dstCW > 0 && dstCH > 0) {
-        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, T, srcCW, srcCH, x + L, y + T, xsCenter, ysCenter, color, alpha);
+        Renderer_drawSpritePartExt(renderer, spriteIndex, subimg, L, T, srcCW, srcCH, x + L, y + T, xsCenter, ysCenter, angleDeg, pivotX, pivotY, color, alpha);
     }
 }
 
@@ -436,7 +436,7 @@ static void Renderer_drawTile(Renderer* renderer, RoomTile* tile, float offsetX,
     float alpha = (alphaByte == 0) ? 1.0f : (float) alphaByte / 255.0f;
     uint32_t bgr = tile->color & 0x00FFFFFF;
 
-    renderer->vtable->drawSpritePart(renderer, tpagIndex, atlasOffX, atlasOffY, srcW, srcH, drawX, drawY, tile->scaleX, tile->scaleY, bgr, alpha);
+    renderer->vtable->drawSpritePart(renderer, tpagIndex, atlasOffX, atlasOffY, srcW, srcH, drawX, drawY, tile->scaleX, tile->scaleY, 0.0f, 0.0f, 0.0f, bgr, alpha);
 }
 
 // Mixes 2 colors with a blend factor

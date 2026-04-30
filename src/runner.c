@@ -528,7 +528,7 @@ static void Runner_drawTileLayer(Runner* runner, RoomLayerTilesData* data, float
             float dstX = (float) (tx * tileW) + layerOffsetX + (mirror ? (float) tileW : 0.0f);
             float dstY = (float) (ty * tileH) + layerOffsetY + (flip ? (float) tileH : 0.0f);
 
-            runner->renderer->vtable->drawSpritePart(runner->renderer, tpagIndex, srcX, srcY, (int32_t) tileW, (int32_t) tileH, dstX, dstY, xscale, yscale, 0xFFFFFF, 1.0f);
+            runner->renderer->vtable->drawSpritePart(runner->renderer, tpagIndex, srcX, srcY, (int32_t) tileW, (int32_t) tileH, dstX, dstY, xscale, yscale, 0.0f, 0.0f, 0.0f, 0xFFFFFF, 1.0f);
         }
     }
 }
