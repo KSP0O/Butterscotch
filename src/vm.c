@@ -1494,19 +1494,29 @@ static void handleAddString(VMContext* ctx, RValue a, RValue b, uint8_t resultTy
         RValue_free(&b);
         stackPushTyped(ctx, RValue_makeOwnedString(result), resultType);
     } else {
-        // String + Number: convert both to strings and concatenate (GMS behavior)
-        char* sa = RValue_toString(a);
-        char* sb = RValue_toString(b);
-        size_t lenA = strlen(sa);
-        size_t lenB = strlen(sb);
-        char* result = safeMalloc(lenA + lenB + 1);
-        memcpy(result, sa, lenA);
-        memcpy(result + lenA, sb, lenB + 1);
-        free(sa);
-        free(sb);
+        // For anything else, we'll convert to numbers and then sum
+#ifndef NO_RVALUE_INT64
+        if (a.type == RVALUE_INT64 || b.type == RVALUE_INT64) {
+            int64_t result = (a.type == RVALUE_STRING) ? (int64_t) GMLReal_strtod(a.string, nullptr) : a.int64;
+            result += (b.type == RVALUE_STRING) ? (int64_t) GMLReal_strtod(b.string, nullptr) : b.int64;
+            RValue_free(&a);
+            RValue_free(&b);
+            stackPushTyped(ctx, RValue_makeInt64(result), resultType);
+            return;
+        }
+#endif
+        if (a.type == RVALUE_INT32 || b.type == RVALUE_INT32) {
+            int32_t result = (a.type == RVALUE_STRING) ? (int32_t) GMLReal_strtod(a.string, nullptr) : a.int32;
+            result += (b.type == RVALUE_STRING) ? (int32_t) GMLReal_strtod(b.string, nullptr) : b.int32;
+            RValue_free(&a);
+            RValue_free(&b);
+            stackPushTyped(ctx, RValue_makeInt32(result), resultType);
+            return;
+        }
+        GMLReal result = RValue_toReal(a) + RValue_toReal(b);
         RValue_free(&a);
         RValue_free(&b);
-        stackPushTyped(ctx, RValue_makeOwnedString(result), resultType);
+        stackPushTyped(ctx, RValue_makeReal(result), resultType);
     }
 }
 
