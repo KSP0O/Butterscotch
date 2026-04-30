@@ -1,12 +1,38 @@
 #pragma once
 
 #include "common.h"
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
 // Binary reads/writes from a raw byte buffer.
 // When IS_BIG_ENDIAN is defined, reads are byte-swapped to interpret serialized little-endian data.
 
+#if defined(__clang__) || defined(__GNUC__)
+static inline uint16_t BinaryUtils_bswap16(uint16_t value) {
+    return __builtin_bswap16(value);
+}
+
+static inline uint32_t BinaryUtils_bswap32(uint32_t value) {
+    return __builtin_bswap32(value);
+}
+
+static inline uint64_t BinaryUtils_bswap64(uint64_t value) {
+    return __builtin_bswap64(value);
+}
+#elif defined(_MSC_VER)
+static inline uint16_t BinaryUtils_bswap16(uint16_t value) {
+    return _byteswap_ushort(value);
+}
+
+static inline uint32_t BinaryUtils_bswap32(uint32_t value) {
+    return _byteswap_ulong(value);
+}
+
+static inline uint64_t BinaryUtils_bswap64(uint64_t value) {
+    return _byteswap_uint64(value);
+}
+#else
 static inline uint16_t BinaryUtils_bswap16(uint16_t value) {
     return (uint16_t) ((value >> 8) | (value << 8));
 }
@@ -28,6 +54,7 @@ static inline uint64_t BinaryUtils_bswap64(uint64_t value) {
            ((value & 0x00FF000000000000ull) >> 40) |
            ((value & 0xFF00000000000000ull) >> 56);
 }
+#endif
 
 static inline uint16_t BinaryUtils_toLittle16(uint16_t value) {
 #if defined(IS_BIG_ENDIAN)
