@@ -6114,24 +6114,8 @@ static RValue builtinCollisionLine(VMContext* ctx, RValue* args, int32_t argCoun
         if (!inst->active) continue;
         if (notme && inst == self) continue;
 
+        if (!Collision_lineOverlapsInstance(ctx->dataWin, inst, lx1, ly1, lx2, ly2)) continue;
         InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-        if (!bbox.valid) continue;
-
-        // Fast reject: line's bounding rect vs instance bbox
-        GMLReal lineLeft   = GMLReal_fmin(lx1, lx2);
-        GMLReal lineRight  = GMLReal_fmax(lx1, lx2);
-        GMLReal lineTop    = GMLReal_fmin(ly1, ly2);
-        GMLReal lineBottom = GMLReal_fmax(ly1, ly2);
-        // bbox.right/bbox.bottom are exclusive (marginRight + 1, marginBottom + 1), so use >= for those comparisons to correctly exclude boundary-touching cases
-        // See GM-HTML5's yyInstance.js "Collision_Line"
-        if (lineLeft >= bbox.right)
-            continue;
-        if (bbox.left > lineRight)
-            continue;
-        if (bbox.top > lineBottom)
-            continue;
-        if (lineTop >= bbox.bottom)
-            continue;
 
         // Normalize line left-to-right for clipping
         GMLReal xl = lx1, yl = ly1, xr = lx2, yr = ly2;
@@ -6304,11 +6288,9 @@ static RValue builtinCollisionRectangle(VMContext* ctx, RValue* args, int32_t ar
         if (!inst->active) continue;
         if (notme && inst == self) continue;
 
-        InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-        if (!bbox.valid) continue;
+        if (!Collision_rectOverlapsInstance(ctx->dataWin, inst, x1, y1, x2, y2)) continue;
 
-        // AABB overlap test
-        if (x1 >= bbox.right || bbox.left >= x2 || y1 >= bbox.bottom || bbox.top >= y2) continue;
+        InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
 
         // Precise check if requested and sprite has precise masks
         if (prec != 0) {
@@ -6386,23 +6368,12 @@ static RValue builtinCollisionCircle(VMContext* ctx, RValue* args, int32_t argCo
                 if (query.filterByInstanceId && inst->instanceId != (uint32_t) targetObjIndex) continue;
                 if (!query.filterByObject && !query.filterByInstanceId && targetObjIndex != INSTANCE_ALL) continue;
 
-                InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-                if (!bbox.valid) continue;
-
-                // Circle vs AABB: closest point on bbox to circle center
-                GMLReal closestX = cx;
-                if (bbox.left > closestX) closestX = bbox.left;
-                if (closestX > bbox.right) closestX = bbox.right;
-                GMLReal closestY = cy;
-                if (bbox.top > closestY) closestY = bbox.top;
-                if (closestY > bbox.bottom) closestY = bbox.bottom;
-                GMLReal dx = closestX - cx;
-                GMLReal dy = closestY - cy;
-                if (dx * dx + dy * dy > radiusSq) continue;
+                if (!Collision_circleOverlapsInstance(ctx->dataWin, inst, cx, cy, radius)) continue;
 
                 if (prec != 0) {
                     Sprite* spr = Collision_getSprite(ctx->dataWin, inst);
                     if (Collision_hasFrameMasks(spr)) {
+                        InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
                         GMLReal iLeft   = GMLReal_fmax(qx1, bbox.left);
                         GMLReal iRight  = GMLReal_fmin(qx2, bbox.right);
                         GMLReal iTop    = GMLReal_fmax(qy1, bbox.top);
@@ -6480,9 +6451,8 @@ static RValue builtinCollisionRectangleList(VMContext* ctx, RValue* args, int32_
                 if (query.filterByObject && !VM_isObjectOrDescendant(ctx->dataWin, inst->objectIndex, target)) continue;
                 if (query.filterByInstanceId && inst->instanceId != (uint32_t) target) continue;
 
+                if (!Collision_rectOverlapsInstance(ctx->dataWin, inst, x1, y1, x2, y2)) continue;
                 InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-                if (!bbox.valid) continue;
-                if (x1 >= bbox.right || bbox.left >= x2 || y1 >= bbox.bottom || bbox.top >= y2) continue;
 
                 if (prec != 0) {
                     Sprite* spr = Collision_getSprite(ctx->dataWin, inst);
@@ -6539,13 +6509,8 @@ static RValue builtinCollisionPoint(VMContext* ctx, RValue* args, int32_t argCou
         if (!inst->active) continue;
         if (notme && inst == self) continue;
 
-        InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-        if (!bbox.valid) continue;
+        if (!Collision_pointInsideInstanceBox(ctx->dataWin, inst, px, py)) continue;
 
-        // Point-in-AABB test
-        if (bbox.left > px || px >= bbox.right || bbox.top > py || py >= bbox.bottom) continue;
-
-        // Precise check if requested
         if (prec != 0) {
             Sprite* spr = Collision_getSprite(ctx->dataWin, inst);
             if (Collision_hasFrameMasks(spr)) {
@@ -6632,11 +6597,7 @@ static RValue builtinInstancePosition(VMContext* ctx, RValue* args, int32_t argC
         Instance* inst = runner->instanceSnapshots[i];
         if (!inst->active) continue;
 
-        InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, inst);
-        if (!bbox.valid) continue;
-
-        // Point-in-AABB test (no precise, no notme)
-        if (bbox.left > px || px >= bbox.right || bbox.top > py || py >= bbox.bottom) continue;
+        if (!Collision_pointInsideInstanceBox(ctx->dataWin, inst, px, py)) continue;
 
         resultId = inst->instanceId;
         break;
@@ -6674,10 +6635,7 @@ static RValue builtinPositionMeeting(VMContext* ctx, RValue* args, int32_t argCo
                 if (query.filterByObject && !VM_isObjectOrDescendant(runner->dataWin, other->objectIndex, target)) continue;
                 if (query.filterByInstanceId && other->instanceId != (uint32_t) target) continue;
 
-                InstanceBBox bbox = Collision_computeBBox(ctx->dataWin, other);
-                if (!bbox.valid) continue;
-
-                if (bbox.left > px || px >= bbox.right || bbox.top > py || py >= bbox.bottom) continue;
+                if (!Collision_pointInsideInstanceBox(ctx->dataWin, other, px, py)) continue;
 
                 found = true;
                 break;

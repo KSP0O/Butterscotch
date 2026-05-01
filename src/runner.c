@@ -1781,9 +1781,9 @@ static void dispatchCollisionEvents(Runner* runner) {
                     if (bboxSelf.left >= bboxOther.right || bboxOther.left >= bboxSelf.right || bboxSelf.top >= bboxOther.bottom || bboxOther.top >= bboxSelf.bottom)
                         continue;
 
-                    // Precise collision check if either sprite needs it
+                    // Precise collision check if either sprite needs it (per-pixel for sepMasks==1, OBB SAT for rotated sepMasks==2).
                     Sprite* sprOther = Collision_getSprite(dataWin, other);
-                    bool needsPrecise = (sprSelf != nullptr && sprSelf->sepMasks == 1) || (sprOther != nullptr && sprOther->sepMasks == 1);
+                    bool needsPrecise = (sprSelf != nullptr && sprSelf->sepMasks == 1) || (sprOther != nullptr && sprOther->sepMasks == 1) || Collision_obbNeedsSAT(sprSelf, self) || Collision_obbNeedsSAT(sprOther, other);
 
                     if (needsPrecise) {
                         if (!Collision_instancesOverlapPrecise(dataWin, runner->collisionCompatibilityMode, self, other, bboxSelf, bboxOther)) continue;
