@@ -2304,57 +2304,8 @@ static RValue variableInstanceGetOn(VMContext* ctx, Instance* target, const char
     return val;
 }
 
-static RValue builtinVariableInstanceGet(VMContext* ctx, RValue* args, int32_t argCount) {
-    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-
-    Runner* runner = (Runner*) ctx->runner;
-
-    if (id >= 100000) {
-        Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active) return variableInstanceGetOn(ctx, inst, name);
-        return RValue_makeUndefined();
-    }
-
-    // Object index: return value from first matching active instance. Pop the snapshot on every return path so we don't strand a chunk in the arena.
-    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
-    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
-    for (int32_t i = snapBase; snapEnd > i; i++) {
-        Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active) {
-            Runner_popInstanceSnapshot(runner, snapBase);
-            return variableInstanceGetOn(ctx, inst, name);
-        }
-    }
-    Runner_popInstanceSnapshot(runner, snapBase);
-    return RValue_makeUndefined();
-}
-
-static RValue builtinVariableInstanceSet(VMContext* ctx, RValue* args, int32_t argCount) {
-    if (3 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-    RValue val = args[2];
-
-    Runner* runner = (Runner*) ctx->runner;
-
-    if (id >= 100000) {
-        // Specific instance ID
-        Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active) variableInstanceSetOn(ctx, inst, name, val);
-        return RValue_makeUndefined();
-    }
-
-    // Object index: set on all active instances matching (including descendants). The setter can run user code, so iterate a snapshot.
-    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
-    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
-    for (int32_t i = snapBase; snapEnd > i; i++) {
-        Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active) variableInstanceSetOn(ctx, inst, name, val);
-    }
-    Runner_popInstanceSnapshot(runner, snapBase);
-    return RValue_makeUndefined();
+static inline bool variableScopedMatches(Instance* inst, bool structOnly) {
+    return inst->active && (!structOnly || inst->objectIndex == -1);
 }
 
 static bool variableInstanceExistsOn(VMContext* ctx, Instance* target, const char* name) {
@@ -2364,111 +2315,102 @@ static bool variableInstanceExistsOn(VMContext* ctx, Instance* target, const cha
     return IntRValueHashMap_contains(&target->selfVars, ctx->selfVarNameMap[slot].value);
 }
 
-static RValue builtinVariableInstanceExists(VMContext* ctx, RValue* args, int32_t argCount) {
-    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeBool(false);
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-
+static RValue variableScopedGet(VMContext* ctx, int32_t id, const char* name, bool structOnly) {
     Runner* runner = (Runner*) ctx->runner;
 
     if (id >= 100000) {
         Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active) return RValue_makeBool(variableInstanceExistsOn(ctx, inst, name));
-        return RValue_makeBool(false);
-    }
-
-    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
-    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
-    for (int32_t i = snapBase; snapEnd > i; i++) {
-        Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active) {
-            Runner_popInstanceSnapshot(runner, snapBase);
-            return RValue_makeBool(variableInstanceExistsOn(ctx, inst, name));
-        }
-    }
-    Runner_popInstanceSnapshot(runner, snapBase);
-    return RValue_makeBool(false);
-}
-
-// ===[ VARIABLE_STRUCTS ]===
-
-static RValue builtinVariableStructGet(VMContext* ctx, RValue* args, int32_t argCount) {
-    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-
-    Runner* runner = (Runner*) ctx->runner;
-
-    if (id >= 100000) {
-        Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active && inst->objectIndex == -1) return variableInstanceGetOn(ctx, inst, name);
+        if (inst != nullptr && variableScopedMatches(inst, structOnly)) return variableInstanceGetOn(ctx, inst, name);
         return RValue_makeUndefined();
     }
 
-    // Object index: return value from first matching active instance. Pop the snapshot on every return path so we don't strand a chunk in the arena.
+    // Object index: return value from first matching active instance.
+    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
+    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
+    RValue result = RValue_makeUndefined();
+    for (int32_t i = snapBase; snapEnd > i; i++) {
+        Instance* inst = runner->instanceSnapshots[i];
+        if (variableScopedMatches(inst, structOnly)) {
+            result = variableInstanceGetOn(ctx, inst, name);
+            break;
+        }
+    }
+    Runner_popInstanceSnapshot(runner, snapBase);
+    return result;
+}
+
+static void variableScopedSet(VMContext* ctx, int32_t id, const char* name, RValue val, bool structOnly) {
+    Runner* runner = (Runner*) ctx->runner;
+
+    if (id >= 100000) {
+        Instance* inst = hmget(runner->instancesById, id);
+        if (inst != nullptr && variableScopedMatches(inst, structOnly)) variableInstanceSetOn(ctx, inst, name, val);
+        return;
+    }
+
+    // Object index: set on all matching active instances (including descendants). The setter can run user code, so iterate a snapshot.
     int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
     int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
     for (int32_t i = snapBase; snapEnd > i; i++) {
         Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active && inst->objectIndex == -1) {
-            Runner_popInstanceSnapshot(runner, snapBase);
-            return variableInstanceGetOn(ctx, inst, name);
+        if (variableScopedMatches(inst, structOnly)) variableInstanceSetOn(ctx, inst, name, val);
+    }
+    Runner_popInstanceSnapshot(runner, snapBase);
+}
+
+static bool variableScopedExists(VMContext* ctx, int32_t id, const char* name, bool structOnly) {
+    Runner* runner = (Runner*) ctx->runner;
+
+    if (id >= 100000) {
+        Instance* inst = hmget(runner->instancesById, id);
+        if (inst != nullptr && variableScopedMatches(inst, structOnly)) return variableInstanceExistsOn(ctx, inst, name);
+        return false;
+    }
+
+    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
+    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
+    bool result = false;
+    for (int32_t i = snapBase; snapEnd > i; i++) {
+        Instance* inst = runner->instanceSnapshots[i];
+        if (variableScopedMatches(inst, structOnly)) {
+            result = variableInstanceExistsOn(ctx, inst, name);
+            break;
         }
     }
     Runner_popInstanceSnapshot(runner, snapBase);
+    return result;
+}
+
+static RValue builtinVariableInstanceGet(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
+    return variableScopedGet(ctx, RValue_toInt32(args[0]), args[1].string, false);
+}
+
+static RValue builtinVariableInstanceSet(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (3 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
+    variableScopedSet(ctx, RValue_toInt32(args[0]), args[1].string, args[2], false);
     return RValue_makeUndefined();
+}
+
+static RValue builtinVariableInstanceExists(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeBool(false);
+    return RValue_makeBool(variableScopedExists(ctx, RValue_toInt32(args[0]), args[1].string, false));
+}
+
+static RValue builtinVariableStructGet(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
+    return variableScopedGet(ctx, RValue_toInt32(args[0]), args[1].string, true);
 }
 
 static RValue builtinVariableStructSet(VMContext* ctx, RValue* args, int32_t argCount) {
     if (3 > argCount || args[1].type != RVALUE_STRING) return RValue_makeUndefined();
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-    RValue val = args[2];
-
-    Runner* runner = (Runner*) ctx->runner;
-
-    if (id >= 100000) {
-        // Specific instance ID
-        Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active && inst->objectIndex == -1) variableInstanceSetOn(ctx, inst, name, val);
-        return RValue_makeUndefined();
-    }
-
-    // Object index: set on all active instances matching (including descendants). The setter can run user code, so iterate a snapshot.
-    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
-    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
-    for (int32_t i = snapBase; snapEnd > i; i++) {
-        Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active && inst->objectIndex == -1) variableInstanceSetOn(ctx, inst, name, val);
-    }
-    Runner_popInstanceSnapshot(runner, snapBase);
+    variableScopedSet(ctx, RValue_toInt32(args[0]), args[1].string, args[2], true);
     return RValue_makeUndefined();
 }
 
 static RValue builtinVariableStructExists(VMContext* ctx, RValue* args, int32_t argCount) {
     if (2 > argCount || args[1].type != RVALUE_STRING) return RValue_makeBool(false);
-    int32_t id = RValue_toInt32(args[0]);
-    const char* name = args[1].string;
-
-    Runner* runner = (Runner*) ctx->runner;
-
-    if (id >= 100000) {
-        Instance* inst = hmget(runner->instancesById, id);
-        if (inst != nullptr && inst->active && inst->objectIndex == -1) return RValue_makeBool(variableInstanceExistsOn(ctx, inst, name));
-        return RValue_makeBool(false);
-    }
-
-    int32_t snapBase = Runner_pushInstancesOfObject(runner, id);
-    int32_t snapEnd  = (int32_t) arrlen(runner->instanceSnapshots);
-    for (int32_t i = snapBase; snapEnd > i; i++) {
-        Instance* inst = runner->instanceSnapshots[i];
-        if (inst->active && inst->objectIndex == -1) {
-            Runner_popInstanceSnapshot(runner, snapBase);
-            return RValue_makeBool(variableInstanceExistsOn(ctx, inst, name));
-        }
-    }
-    Runner_popInstanceSnapshot(runner, snapBase);
-    return RValue_makeBool(false);
+    return RValue_makeBool(variableScopedExists(ctx, RValue_toInt32(args[0]), args[1].string, true));
 }
 
 // ===[ METHOD ]===
