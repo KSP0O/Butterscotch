@@ -8286,63 +8286,9 @@ static RValue builtinAssetGetIndex(VMContext* ctx, RValue* args, int32_t argCoun
     char* name = RValue_toString(args[0]);
     DataWin* dw = ctx->dataWin;
 
-    repeat(dw->objt.count, i) {
-        if (strcmp(dw->objt.objects[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->sprt.count, i) {
-        if (strcmp(dw->sprt.sprites[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->sond.count, i) {
-        if (strcmp(dw->sond.sounds[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->bgnd.count, i) {
-        if (strcmp(dw->bgnd.backgrounds[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->path.count, i) {
-        if (strcmp(dw->path.paths[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->scpt.count, i) {
-        if (strcmp(dw->scpt.scripts[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->font.count, i) {
-        if (strcmp(dw->font.fonts[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->tmln.count, i) {
-        if (strcmp(dw->tmln.timelines[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-    repeat(dw->room.count, i) {
-        if (strcmp(dw->room.rooms[i].name, name) == 0) {
-            free(name);
-            return RValue_makeReal(i);
-        }
-    }
-
+    int32_t value = shget(ctx->runner->assetsByName, name);
     free(name);
-    return RValue_makeReal(-1);
+    return RValue_makeReal(value);
 }
 
 static RValue builtinGpuSetBlendMode(VMContext* ctx, RValue* args, int32_t argCount) {

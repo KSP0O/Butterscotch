@@ -1475,6 +1475,36 @@ Runner* Runner_create(DataWin* dataWin, VMContext* vm, Renderer* renderer, FileS
     EventSlotMap_build(&runner->eventSlotMap, dataWin);
     ResolvedEventTable_build(&runner->eventTable, dataWin, &runner->eventSlotMap);
 
+    // Create assets map
+    shdefault(runner->assetsByName, -1);
+    repeat(dataWin->objt.count, i) {
+        shput(runner->assetsByName, dataWin->objt.objects[i].name, i);
+    }
+    repeat(dataWin->sprt.count, i) {
+        shput(runner->assetsByName, dataWin->sprt.sprites[i].name, i);
+    }
+    repeat(dataWin->sond.count, i) {
+        shput(runner->assetsByName, dataWin->sond.sounds[i].name, i);
+    }
+    repeat(dataWin->bgnd.count, i) {
+        shput(runner->assetsByName, dataWin->bgnd.backgrounds[i].name, i);
+    }
+    repeat(dataWin->path.count, i) {
+        shput(runner->assetsByName, dataWin->path.paths[i].name, i);
+    }
+    repeat(dataWin->scpt.count, i) {
+        shput(runner->assetsByName, dataWin->scpt.scripts[i].name, i);
+    }
+    repeat(dataWin->font.count, i) {
+        shput(runner->assetsByName, dataWin->font.fonts[i].name, i);
+    }
+    repeat(dataWin->tmln.count, i) {
+        shput(runner->assetsByName, dataWin->tmln.timelines[i].name, i);
+    }
+    repeat(dataWin->room.count, i) {
+        shput(runner->assetsByName, dataWin->room.rooms[i].name, i);
+    }
+
     Runner_reset(runner);
 
     populateObjectsWithAnyEventOfType(runner);
@@ -2760,6 +2790,7 @@ void Runner_free(Runner* runner) {
     runner->eventDispatchInstances = nullptr;
     ResolvedEventTable_free(&runner->eventTable);
     EventSlotMap_destroy(&runner->eventSlotMap);
+    shfree(runner->assetsByName);
 
     RunnerKeyboard_free(runner->keyboard);
     RunnerGamepad_free(runner->gamepads);
