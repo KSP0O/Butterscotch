@@ -3681,8 +3681,38 @@ static RValue builtinIniOpen(VMContext* ctx, RValue* args, int32_t argCount) {
     return RValue_makeUndefined();
 }
 
+static RValue builtinIniOpenFromString(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (1 > argCount) return RValue_makeUndefined();
+
+    Runner* runner = (Runner*) ctx->runner;
+    const char* data = (args[0].type == RVALUE_STRING && args[0].string != nullptr) ? args[0].string : "";
+
+    if (runner->currentIni != nullptr) {
+        Ini_free(runner->currentIni);
+        runner->currentIni = nullptr;
+    }
+    free(runner->currentIniPath);
+    runner->currentIniPath = nullptr;
+    discardIniCache(runner);
+
+    runner->currentIni = Ini_parse(data);
+    runner->currentIniDirty = false;
+
+    return RValue_makeUndefined();
+}
+
 static RValue builtinIniClose(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
     Runner* runner = (Runner*) ctx->runner;
+
+    // String-based session (no path): caller consumes the serialized content.
+    // Nothing to cache by path, nothing to flush to disk.
+    if (runner->currentIni != nullptr && runner->currentIniPath == nullptr) {
+        char* serialized = Ini_serialize(runner->currentIni, INI_SERIALIZE_DEFAULT_INITIAL_CAPACITY);
+        Ini_free(runner->currentIni);
+        runner->currentIni = nullptr;
+        return RValue_makeOwnedString(serialized);
+    }
+
     if (runner->currentIni != nullptr) {
         FileSystem* fs = runner->fileSystem;
 
@@ -3707,15 +3737,16 @@ static RValue builtinIniClose(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_U
 }
 
 static RValue builtinIniReadString(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (3 > argCount) return RValue_makeOwnedString(safeStrdup(""));
     Runner* runner = (Runner*) ctx->runner;
-    if (3 > argCount || runner->currentIni == nullptr) return RValue_makeOwnedString(safeStrdup(""));
 
-    const char* section = (args[0].type == RVALUE_STRING ? args[0].string : "");
-    const char* key = (args[1].type == RVALUE_STRING ? args[1].string : "");
-
-    const char* value = Ini_getString(runner->currentIni, section, key);
-    if (value != nullptr) {
-        return RValue_makeOwnedString(safeStrdup(value));
+    if (runner->currentIni != nullptr) {
+        const char* section = (args[0].type == RVALUE_STRING ? args[0].string : "");
+        const char* key = (args[1].type == RVALUE_STRING ? args[1].string : "");
+        const char* value = Ini_getString(runner->currentIni, section, key);
+        if (value != nullptr) {
+            return RValue_makeOwnedString(safeStrdup(value));
+        }
     }
 
     // Return the default value (3rd arg)
@@ -3727,15 +3758,16 @@ static RValue builtinIniReadString(VMContext* ctx, RValue* args, int32_t argCoun
 }
 
 static RValue builtinIniReadReal(VMContext* ctx, RValue* args, int32_t argCount) {
+    if (3 > argCount) return RValue_makeReal(0.0);
     Runner* runner = (Runner*) ctx->runner;
-    if (3 > argCount || runner->currentIni == nullptr) return RValue_makeReal(0.0);
 
-    const char* section = (args[0].type == RVALUE_STRING ? args[0].string : "");
-    const char* key = (args[1].type == RVALUE_STRING ? args[1].string : "");
-
-    const char* value = Ini_getString(runner->currentIni, section, key);
-    if (value != nullptr) {
-        return RValue_makeReal(atof(value));
+    if (runner->currentIni != nullptr) {
+        const char* section = (args[0].type == RVALUE_STRING ? args[0].string : "");
+        const char* key = (args[1].type == RVALUE_STRING ? args[1].string : "");
+        const char* value = Ini_getString(runner->currentIni, section, key);
+        if (value != nullptr) {
+            return RValue_makeReal(atof(value));
+        }
     }
 
     return RValue_makeReal(RValue_toReal(args[2]));
@@ -5119,6 +5151,60 @@ static RValue builtin_bufferSave(MAYBE_UNUSED VMContext* ctx, RValue* args, MAYB
 }
 
 STUB_RETURN_ZERO(buffer_base64_encode)
+
+// ===[ Async Buffer / Save Data ]===
+
+static RValue builtin_bufferAsyncGroupBegin(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    FileSystem* fs = runner->fileSystem;
+    const char* name = (argCount > 0 && args[0].type == RVALUE_STRING && args[0].string != nullptr) ? args[0].string : "";
+    fs->vtable->asyncGroupBegin(fs, name);
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_bufferAsyncGroupOption(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    FileSystem* fs = runner->fileSystem;
+    const char* key = (argCount > 0 && args[0].type == RVALUE_STRING && args[0].string != nullptr) ? args[0].string : "";
+    fs->vtable->asyncGroupOption(fs, key);
+    return RValue_makeUndefined();
+}
+
+static RValue builtin_bufferAsyncGroupEnd(VMContext* ctx, MAYBE_UNUSED RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    FileSystem* fs = runner->fileSystem;
+    return RValue_makeReal((GMLReal) fs->vtable->asyncGroupEnd(fs));
+}
+
+static RValue builtin_bufferSaveAsync(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    FileSystem* fs = runner->fileSystem;
+    int32_t id = RValue_toInt32(args[0]);
+    char* path = RValue_toString(args[1]);
+    int32_t offset = (argCount > 2) ? RValue_toInt32(args[2]) : 0;
+    int32_t size = (argCount > 3) ? RValue_toInt32(args[3]) : 0;
+
+    GmlBuffer* buf = gmlBufferGet(runner, id);
+    int32_t requestId = -1;
+    if (buf != nullptr) {
+        requestId = fs->vtable->asyncBufferSave(fs, buf->data, size, path, offset);
+    }
+    free(path);
+    return RValue_makeReal((GMLReal) requestId);
+}
+
+static RValue builtin_bufferLoadAsync(VMContext* ctx, RValue* args, MAYBE_UNUSED int32_t argCount) {
+    Runner* runner = (Runner*) ctx->runner;
+    FileSystem* fs = runner->fileSystem;
+    int32_t bufferId = RValue_toInt32(args[0]);
+    char* path = RValue_toString(args[1]);
+    int32_t offset = (argCount > 2) ? RValue_toInt32(args[2]) : 0;
+    int32_t maxSize = (argCount > 3) ? RValue_toInt32(args[3]) : 0;
+
+    int32_t requestId = fs->vtable->asyncBufferLoad(fs, bufferId, path, offset, maxSize);
+    free(path);
+    return RValue_makeReal((GMLReal) requestId);
+}
 
 // PSN stubs
 STUB_RETURN_UNDEFINED(psn_init)
@@ -8563,6 +8649,7 @@ void VMBuiltins_registerAll(VMContext* ctx) {
 
     // INI
     VM_registerBuiltin(ctx, "ini_open", builtinIniOpen);
+    VM_registerBuiltin(ctx, "ini_open_from_string", builtinIniOpenFromString);
     VM_registerBuiltin(ctx, "ini_close", builtinIniClose);
     VM_registerBuiltin(ctx, "ini_write_real", builtinIniWriteReal);
     VM_registerBuiltin(ctx, "ini_write_string", builtinIniWriteString);
@@ -8667,6 +8754,11 @@ void VMBuiltins_registerAll(VMContext* ctx) {
     VM_registerBuiltin(ctx, "buffer_get_size", builtin_bufferGetSize);
     VM_registerBuiltin(ctx, "buffer_load", builtin_bufferLoad);
     VM_registerBuiltin(ctx, "buffer_save", builtin_bufferSave);
+    VM_registerBuiltin(ctx, "buffer_async_group_begin", builtin_bufferAsyncGroupBegin);
+    VM_registerBuiltin(ctx, "buffer_async_group_option", builtin_bufferAsyncGroupOption);
+    VM_registerBuiltin(ctx, "buffer_async_group_end", builtin_bufferAsyncGroupEnd);
+    VM_registerBuiltin(ctx, "buffer_save_async", builtin_bufferSaveAsync);
+    VM_registerBuiltin(ctx, "buffer_load_async", builtin_bufferLoadAsync);
     VM_registerBuiltin(ctx, "buffer_base64_encode", builtin_buffer_base64_encode);
 
     // PSN

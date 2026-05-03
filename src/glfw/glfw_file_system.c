@@ -119,6 +119,12 @@ static bool glfwWriteFileBinary(FileSystem* fs, const char* relativePath, const 
     return written == (size_t) size;
 }
 
+static void glfwAsyncGroupBegin(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* name) {}
+static void glfwAsyncGroupOption(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* key) {}
+static int32_t glfwAsyncGroupEnd(MAYBE_UNUSED FileSystem* fs) { return -1; }
+static int32_t glfwAsyncBufferSave(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const uint8_t* data, MAYBE_UNUSED int32_t size, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset) { return -1; }
+static int32_t glfwAsyncBufferLoad(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED int32_t bufferId, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset, MAYBE_UNUSED int32_t maxSize) { return -1; }
+
 // ===[ Vtable ]===
 
 static FileSystemVtable glfwFileSystemVtable = {
@@ -129,6 +135,11 @@ static FileSystemVtable glfwFileSystemVtable = {
     .deleteFile = glfwDeleteFile,
     .readFileBinary = glfwReadFileBinary,
     .writeFileBinary = glfwWriteFileBinary,
+    .asyncGroupBegin = glfwAsyncGroupBegin,
+    .asyncGroupOption = glfwAsyncGroupOption,
+    .asyncGroupEnd = glfwAsyncGroupEnd,
+    .asyncBufferSave = glfwAsyncBufferSave,
+    .asyncBufferLoad = glfwAsyncBufferLoad,
 };
 
 // ===[ Lifecycle ]===

@@ -396,6 +396,12 @@ static bool ps2WriteFileBinary(FileSystem* fs, const char* relativePath, const u
     return written == (size_t) size;
 }
 
+static void ps2AsyncGroupBegin(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* name) {}
+static void ps2AsyncGroupOption(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* key) {}
+static int32_t ps2AsyncGroupEnd(MAYBE_UNUSED FileSystem* fs) { return -1; }
+static int32_t ps2AsyncBufferSave(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const uint8_t* data, MAYBE_UNUSED int32_t size, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset) { return -1; }
+static int32_t ps2AsyncBufferLoad(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED int32_t bufferId, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset, MAYBE_UNUSED int32_t maxSize) { return -1; }
+
 // ===[ Vtable ]===
 
 static FileSystemVtable ps2FileSystemVtable = {
@@ -406,6 +412,11 @@ static FileSystemVtable ps2FileSystemVtable = {
     .deleteFile = deleteFile,
     .readFileBinary = ps2ReadFileBinary,
     .writeFileBinary = ps2WriteFileBinary,
+    .asyncGroupBegin = ps2AsyncGroupBegin,
+    .asyncGroupOption = ps2AsyncGroupOption,
+    .asyncGroupEnd = ps2AsyncGroupEnd,
+    .asyncBufferSave = ps2AsyncBufferSave,
+    .asyncBufferLoad = ps2AsyncBufferLoad,
 };
 
 // ===[ Lifecycle ]===

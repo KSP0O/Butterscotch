@@ -42,14 +42,15 @@
 #define DRAW_POST      77
 
 // ===[ Other Sub-event Constants ]===
-#define OTHER_OUTSIDE_ROOM  0
-#define OTHER_GAME_START    2
-#define OTHER_ROOM_START    4
-#define OTHER_ROOM_END      5
-#define OTHER_ANIMATION_END 7
-#define OTHER_END_OF_PATH   8
-#define OTHER_USER0         10
-#define OTHER_ASYNC_SYSTEM  75
+#define OTHER_OUTSIDE_ROOM    0
+#define OTHER_GAME_START      2
+#define OTHER_ROOM_START      4
+#define OTHER_ROOM_END        5
+#define OTHER_ANIMATION_END   7
+#define OTHER_END_OF_PATH     8
+#define OTHER_USER0           10
+#define OTHER_ASYNC_SAVE_LOAD 72
+#define OTHER_ASYNC_SYSTEM    75
 
 #define MAX_VIEWS 8
 
@@ -397,6 +398,10 @@ typedef struct Runner {
     // Async map ID
     int32_t asyncLoadMapId;
 
+    // Pending async save/load completions queued by platform impls; drained at the start of Runner_step.
+    // Each entry fires an Other_72 (Async Save/Load) event with async_load = { id, status }.
+    struct AsyncSaveLoadCompletion* asyncSaveLoadQueue; // stb_ds dynamic array
+
     // Used by the "os_type" built-in
     YoYoOperatingSystem osType;
 
@@ -416,6 +421,12 @@ void Runner_step(Runner* runner);
 void Runner_executeEvent(Runner* runner, Instance* instance, int32_t eventType, int32_t eventSubtype);
 void Runner_executeEventFromObject(Runner* runner, Instance* instance, int32_t startObjectIndex, int32_t eventType, int32_t eventSubtype);
 void Runner_executeEventForAll(Runner* runner, int32_t eventType, int32_t eventSubtype);
+// Queue an async save/load completion for delivery on the next Runner_step.
+// Platforms (e.g. console save data backends) call this from their async I/O completion path.
+// `id` is the request id previously returned by asyncBufferSave / asyncBufferLoad / asyncGroupEnd.
+// `status` >= 0 indicates success; < 0 indicates failure.
+// Must be called from the same thread that runs Runner_step (no internal locking).
+void Runner_pushAsyncSaveLoadCompletion(Runner* runner, int32_t id, int32_t status);
 void Runner_draw(Runner* runner);
 void Runner_drawGUI(Runner* runner);
 void Runner_drawBackgrounds(Runner* runner, bool foreground);

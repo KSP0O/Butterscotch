@@ -16,6 +16,11 @@
 #include "debug_overlay.h"
 #include "stb_ds.h"
 
+typedef struct AsyncSaveLoadCompletion {
+    int32_t id;
+    int32_t status;
+} AsyncSaveLoadCompletion;
+
 // ===[ Runtime Layer Teardown Helpers ]===
 void Runner_freeRuntimeLayer(RuntimeLayer* runtimeLayer) {
     if (runtimeLayer->dynamicName != nullptr) {
@@ -1342,6 +1347,10 @@ static void cleanupState(Runner* runner) {
     arrfree(runner->mpGridPool);
     runner->mpGridPool = nullptr;
 
+    // Free async save/load completion queue
+    arrfree(runner->asyncSaveLoadQueue);
+    runner->asyncSaveLoadQueue = nullptr;
+
     // Free INI state
     if (runner->currentIni != nullptr) {
         Ini_free(runner->currentIni);
@@ -1384,6 +1393,7 @@ void Runner_reset(Runner* runner) {
 
     runner->pendingRoom = -1;
     runner->asyncLoadMapId = -1;
+    arrsetlen(runner->asyncSaveLoadQueue, 0);
     runner->gameStartFired = false;
     runner->currentRoomIndex = -1;
     runner->currentRoomOrderPosition = -1;
@@ -2137,6 +2147,11 @@ static void persistRoomState(Runner* runner, int32_t roomIndex) {
     state->initialized = true;
 }
 
+void Runner_pushAsyncSaveLoadCompletion(Runner* runner, int32_t id, int32_t status) {
+    AsyncSaveLoadCompletion completion = { .id = id, .status = status };
+    arrput(runner->asyncSaveLoadQueue, completion);
+}
+
 void Runner_step(Runner* runner) {
     // The snapshot arena is stack-like and every push must be matched with a pop within the same frame. Assert that invariant at the top of each step: a non-zero length here means some site below pushed without popping, and we want a loud failure with the offending length so we can find it instead of silently leaking until the next frame.
     requireMessageFormatted(arrlen(runner->instanceSnapshots) == 0, "instanceSnapshots arena was not fully popped at end of previous frame (length=%td)", arrlen(runner->instanceSnapshots));
@@ -2169,6 +2184,34 @@ void Runner_step(Runner* runner) {
             runner->asyncLoadMapId = -1;
         }
     }
+
+    // Drain queued async save/load completions and fire Other_72 (Async Save/Load) for each
+    int32_t saveLoadCount = (int32_t) arrlen(runner->asyncSaveLoadQueue);
+    for (int32_t i = 0; saveLoadCount > i; i++) {
+        AsyncSaveLoadCompletion* completion = &runner->asyncSaveLoadQueue[i];
+        DsMapEntry* map = nullptr;
+        arrput(runner->dsMapPool, map);
+        int32_t mapId = (int32_t) arrlen(runner->dsMapPool) - 1;
+
+        DsMapEntry** mapPtr = &runner->dsMapPool[mapId];
+        shput(*mapPtr, safeStrdup("id"), RValue_makeReal((GMLReal) completion->id));
+        shput(*mapPtr, safeStrdup("status"), RValue_makeReal((GMLReal) completion->status));
+
+        runner->asyncLoadMapId = mapId;
+        Runner_executeEventForAll(runner, EVENT_OTHER, OTHER_ASYNC_SAVE_LOAD);
+
+        mapPtr = &runner->dsMapPool[mapId];
+        if (*mapPtr != nullptr) {
+            repeat(shlen(*mapPtr), j) {
+                free((*mapPtr)[j].key);
+                RValue_free(&(*mapPtr)[j].value);
+            }
+            shfree(*mapPtr);
+            *mapPtr = nullptr;
+        }
+        runner->asyncLoadMapId = -1;
+    }
+    arrsetlen(runner->asyncSaveLoadQueue, 0);
 
     // Save xprevious/yprevious and path_positionprevious for all active instances
     int32_t prevCount = (int32_t) arrlen(runner->instances);

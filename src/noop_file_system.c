@@ -108,6 +108,12 @@ static bool noopWriteFileBinary(FileSystem* fs, const char* relativePath, const 
     return true;
 }
 
+static void noopAsyncGroupBegin(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* name) {}
+static void noopAsyncGroupOption(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const char* key) {}
+static int32_t noopAsyncGroupEnd(MAYBE_UNUSED FileSystem* fs) { return -1; }
+static int32_t noopAsyncBufferSave(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED const uint8_t* data, MAYBE_UNUSED int32_t size, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset) { return -1; }
+static int32_t noopAsyncBufferLoad(MAYBE_UNUSED FileSystem* fs, MAYBE_UNUSED int32_t bufferId, MAYBE_UNUSED const char* relativePath, MAYBE_UNUSED int32_t offset, MAYBE_UNUSED int32_t maxSize) { return -1; }
+
 // ===[ Vtable ]===
 
 static FileSystemVtable noopFileSystemVtable = {
@@ -118,6 +124,11 @@ static FileSystemVtable noopFileSystemVtable = {
     .deleteFile = noopDeleteFile,
     .readFileBinary = noopReadFileBinary,
     .writeFileBinary = noopWriteFileBinary,
+    .asyncGroupBegin = noopAsyncGroupBegin,
+    .asyncGroupOption = noopAsyncGroupOption,
+    .asyncGroupEnd = noopAsyncGroupEnd,
+    .asyncBufferSave = noopAsyncBufferSave,
+    .asyncBufferLoad = noopAsyncBufferLoad,
 };
 
 // ===[ Lifecycle ]===
