@@ -1634,6 +1634,13 @@ Runner* Runner_create(DataWin* dataWin, VMContext* vm, Renderer* renderer, FileS
     runner->osType = OS_WINDOWS;
     runner->keyboard = RunnerKeyboard_create();
     runner->gamepads = RunnerGamepad_create();
+    runner->appSurfaceEnabled = true;
+    runner->appSurfaceAutoDraw = true;
+    runner->usingAppSurface = true;
+    runner->applicationWidth = (int32_t) dataWin->gen8.defaultWindowWidth;
+    runner->applicationHeight = (int32_t) dataWin->gen8.defaultWindowHeight;
+    runner->oldApplicationWidth = runner->applicationWidth;
+    runner->oldApplicationHeight = runner->applicationHeight;
 
     // Collision compatibility mode is "enabled" for all pre-GM 2022.1 games AND for any post-GM 2022.1 games that have the bit 27 set
     runner->collisionCompatibilityMode = (dataWin->detectedFormat.major == 1) || (((dataWin->optn.info >> 27) & 1) != 0);

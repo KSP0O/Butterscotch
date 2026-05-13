@@ -397,6 +397,11 @@ static void glEndFrame(Renderer* renderer) {
     GLRenderer* gl = (GLRenderer*) renderer;
     glBindVertexArray(0);
 
+    if (renderer->usingAppSurface && !renderer->appSurfaceAutoDraw) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return;
+    }
+
     int effectiveEndX, effectiveEndY;
     int effectiveStartX, effectiveStartY;
 
@@ -2203,6 +2208,8 @@ Renderer* GLRenderer_create(void) {
     gl->base.drawHalign = 0;
     gl->base.drawValign = 0;
     gl->base.circlePrecision = 24;
+    gl->base.appSurfaceAutoDraw = true;
+    gl->base.usingAppSurface = true;
     memset(gl->surfaceStack, -1, 16 * sizeof(int32_t));
     return (Renderer*) gl;
 }

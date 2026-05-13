@@ -1389,5 +1389,7 @@ Renderer* GLLegacyRenderer_create(void) {
     gl->base.drawHalign = 0;
     gl->base.drawValign = 0;
     gl->base.circlePrecision = 24;
+    gl->base.appSurfaceAutoDraw = true;
+    gl->base.usingAppSurface = true;
     return (Renderer*) gl;
 }
